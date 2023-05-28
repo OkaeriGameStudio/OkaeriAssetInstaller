@@ -96,6 +96,7 @@ namespace Okaeri.Editor
             GetInstallerScriptPath();
             if (CheckForDependencies())
             {
+                //ShowInstaller();
                 CheckForUpdates();
                 return;
             }
@@ -198,6 +199,7 @@ namespace Okaeri.Editor
         /// </summary>
         private async void CheckForUpdates()
         {
+            
             m_launcherStatus = "Checking for updates";
             string versionLine, versionString;
 
@@ -211,37 +213,47 @@ namespace Okaeri.Editor
                 m_installerVersion = Version.Parse(versionString);
             }
 
-            // Get the latest installer
-            m_launcherStatus = "Getting latest version";
-            var latestInstallerScriptText = await GetLatestInstaller();
-            if (string.IsNullOrWhiteSpace(latestInstallerScriptText))
+            // Try to update the script
+            try
             {
-                var errorMessage = "Could not get the latest installer: Empty or invalid installer content.";
-                m_launcherStatus = "e!" + errorMessage;
-                throw new InvalidOperationException(errorMessage);
+                // Get the latest installer
+                m_launcherStatus = "Getting latest version";
+                var latestInstallerScriptText = await GetLatestInstaller();
+                if (string.IsNullOrWhiteSpace(latestInstallerScriptText))
+                {
+                    var errorMessage = "Could not get the latest installer: Empty or invalid installer content.";
+                    m_launcherStatus = "e!" + errorMessage;
+                    throw new InvalidOperationException(errorMessage);
+                }
+
+                // Get the latest installer version
+                versionLine = latestInstallerScriptText.Substring(0, INSTALLER_VERSION_SIZE);
+                versionString = versionLine.Replace("//VERSION", "");
+                m_latestInstallerVersion = Version.Parse(versionString);
+
+                // Check if we need to update
+                if (m_installerVersion >= m_latestInstallerVersion)
+                {
+                    ShowInstaller();
+                    return;
+                }
+
+                // Update the asset
+                m_launcherStatus = "Installing latest version";
+                AssetDatabase.DeleteAsset(m_installerScriptPath);
+                File.WriteAllText(m_installerScriptPath, latestInstallerScriptText);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                AssetDatabase.SaveAssets();
+
+                // Wait for code compilation
+                await Task.Run(() => Thread.Sleep(2000));
             }
-
-            // Get the latest installer version
-            versionLine = latestInstallerScriptText.Substring(0, INSTALLER_VERSION_SIZE);
-            versionString = versionLine.Replace("//VERSION", "");
-            m_latestInstallerVersion = Version.Parse(versionString);
-
-            // Check if we need to update
-            if (m_installerVersion >= m_latestInstallerVersion)
+            catch
             {
-                ShowInstaller();
-                return;
+                // Logs if the server is dead or no internet
+                m_launcherStatus = "Couldn't connect to the server!";
+                Debug.Log("<color=pink>[Okaeri]" + "Couldn't connect to the server! Proceeding without installer updates... Version: " + m_installerVersion);
             }
-
-            // Update the asset
-            m_launcherStatus = "Installing latest version";
-            AssetDatabase.DeleteAsset(m_installerScriptPath);
-            File.WriteAllText(m_installerScriptPath, latestInstallerScriptText);
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-            AssetDatabase.SaveAssets();
-
-            // Wait for code compilation
-            await Task.Run(() => Thread.Sleep(2000));
 
             // Show the installer
             ShowInstaller();

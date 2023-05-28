@@ -1,4 +1,4 @@
-//VERSION1.0.4
+//VERSION1.0.5
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -273,43 +273,52 @@ namespace Okaeri.Editor
         /// </summary>
         private async void UpdateAssetConfigurations()
         {
-            // Check if the configurations folder is valid
-            var configsPath = INSTALLER_CONFIGS_PATH[0];
-            if (!AssetDatabase.IsValidFolder(configsPath))
+            // Try to update the configs
+            try
             {
-                CreateFolder(configsPath);
-            }
-
-            // Get the latest asset configurations
-            var latestConfigs = await GetLatestAssetConfigurations();
-            if (!string.IsNullOrWhiteSpace(latestConfigs.error))
-            {
-                m_configUpdateError = latestConfigs.error;
-                return;
-            }
-
-            // Get the local asset configurations
-            var localConfigsCRCs = GetLocalAssetConfigurationsCRCs();
-
-            // Create or update asset configurations
-            foreach (var config in latestConfigs.configs)
-            {
-                var configPath = Path.Combine(configsPath, config.name);
-                if (!File.Exists(configPath) || !localConfigsCRCs.ContainsKey(configPath))
+                // Check if the configurations folder is valid
+                var configsPath = INSTALLER_CONFIGS_PATH[0];
+                if (!AssetDatabase.IsValidFolder(configsPath))
                 {
-                    File.WriteAllText(configPath, config.content, Encoding.UTF8);
-                    AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-                    continue;
+                    CreateFolder(configsPath);
                 }
 
-                var localCrc = localConfigsCRCs[configPath];
-                if (localCrc.Equals(config.crc))
+                // Get the latest asset configurations
+                var latestConfigs = await GetLatestAssetConfigurations();
+                if (!string.IsNullOrWhiteSpace(latestConfigs.error))
                 {
-                    continue;
+                    m_configUpdateError = latestConfigs.error;
+                    return;
                 }
 
-                AssetDatabase.DeleteAsset(configPath);
-                File.WriteAllText(configPath, config.content);
+                // Get the local asset configurations
+                var localConfigsCRCs = GetLocalAssetConfigurationsCRCs();
+
+                // Create or update asset configurations
+                foreach (var config in latestConfigs.configs)
+                {
+                    var configPath = Path.Combine(configsPath, config.name);
+                    if (!File.Exists(configPath) || !localConfigsCRCs.ContainsKey(configPath))
+                    {
+                        File.WriteAllText(configPath, config.content, Encoding.UTF8);
+                        AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+                        continue;
+                    }
+
+                    var localCrc = localConfigsCRCs[configPath];
+                    if (localCrc.Equals(config.crc))
+                    {
+                        continue;
+                    }
+
+                    AssetDatabase.DeleteAsset(configPath);
+                    File.WriteAllText(configPath, config.content);
+                }
+            }
+            catch
+            {
+                // Logs if the server is dead or no internet
+                UnityEngine.Debug.Log("<color=pink>[Okaeri]" + "Couldn't connect to the server! Proceeding without configs updates...");
             }
 
             // Load the configurations
@@ -590,30 +599,30 @@ namespace Okaeri.Editor
             {
                 fontStyle = FontStyle.Bold
             };
-            EditorGUILayout.LabelField("Install options:", titleStyle);
+            EditorGUILayout.LabelField("Install Options:", titleStyle);
             GUILayout.Space(8);
 
             // Add install options
             GUI.enabled = false;
-            m_installItems = EditorGUILayout.ToggleLeft("Install asset items", m_installItems, GUILayout.ExpandWidth(true));
-            m_installAnimator = EditorGUILayout.ToggleLeft("Install animator", m_installAnimator, GUILayout.ExpandWidth(true));
+            m_installItems = EditorGUILayout.ToggleLeft("Install Asset Items", m_installItems, GUILayout.ExpandWidth(true));
+            m_installAnimator = EditorGUILayout.ToggleLeft("Install Animator", m_installAnimator, GUILayout.ExpandWidth(true));
             if (m_installAnimator)
             {
                 var guiEnabled = GUI.enabled;
                 GUI.enabled = m_installAnimator;
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Space(20);
-                m_fxAnimatorWD = EditorGUILayout.ToggleLeft("Write Defaults On", m_fxAnimatorWD,
+                m_fxAnimatorWD = EditorGUILayout.ToggleLeft("Write Defaults ON", m_fxAnimatorWD,
                     GUILayout.ExpandWidth(true));
                 EditorGUILayout.EndHorizontal();
                 GUI.enabled = guiEnabled;
             }
-            m_installParameters = EditorGUILayout.ToggleLeft("Install expression parameters", m_installParameters, GUILayout.ExpandWidth(true));
+            m_installParameters = EditorGUILayout.ToggleLeft("Install VRC Parameters", m_installParameters, GUILayout.ExpandWidth(true));
             GUI.enabled = !m_installing;
-            m_installMenu = EditorGUILayout.ToggleLeft("Install expressions menu", m_installMenu, GUILayout.ExpandWidth(true));
+            m_installMenu = EditorGUILayout.ToggleLeft("Install VRC Menu", m_installMenu, GUILayout.ExpandWidth(true));
 
             // Draw the install button
-            if (GUILayout.Button($"Install {m_selectedAssetConfig.AssetName}!", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
+            if (GUILayout.Button($"Install {m_selectedAssetConfig.AssetName}", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
             {
                 // Checks
                 m_installLog.Clear();
@@ -625,10 +634,11 @@ namespace Okaeri.Editor
             }
 
             // Draw the move / rotate button
-            if (GUILayout.Button($"Move / Rotate / Scale Asset Items", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
+            if (GUILayout.Button($"Reposition {m_selectedAssetConfig.AssetName}'s Items", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
             {
                 m_moveRotateScale = true;
-                return;
+                DrawAssetMoveRotateScale();
+                //return;
             }
 
             // Draw the uninstall button
@@ -855,7 +865,12 @@ namespace Okaeri.Editor
             var avatarFxAnimController = m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController as AnimatorController;
             if (avatarFxAnimController == null)
             {
-                return null;
+                // Use blank FX controller
+                var blankFXControllerPath = $"Assets/{m_avatar.name}_FX.controller";
+                AssetDatabase.CopyAsset(Path.Combine(INSTALLER_RESOURCES_PATH, "BlankFX.controller"), blankFXControllerPath);
+                AssetDatabase.Refresh();
+                m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController = AssetDatabase.LoadAssetAtPath<AnimatorController>(blankFXControllerPath);
+                avatarFxAnimController = m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController as AnimatorController;
             }
 
             var avatarFxAnimLayersNames = avatarFxAnimController.layers.Select(l => l.name);
@@ -921,9 +936,12 @@ namespace Okaeri.Editor
             var avatarExpressionParameters = m_avatar.expressionParameters;
             if (avatarExpressionParameters == null)
             {
-                errorMessage = "Avatar has no expression parameters object.";
-                m_installLog.Add($"e|{errorMessage}");
-                throw new InvalidOperationException(errorMessage);
+                // Use blank expression parameters
+                var blankParametersPath = $"Assets/{m_avatar.name}_Parameters.asset";
+                AssetDatabase.CopyAsset(Path.Combine(INSTALLER_RESOURCES_PATH, "BlankParameters.asset"), blankParametersPath);
+                AssetDatabase.Refresh();
+                m_avatar.expressionParameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(blankParametersPath);
+                avatarExpressionParameters = m_avatar.expressionParameters;
             }
 
             // Get the asset expression parameters
@@ -967,10 +985,12 @@ namespace Okaeri.Editor
             var avatarExpressionsMenu = m_avatar.expressionsMenu;
             if (avatarExpressionsMenu == null)
             {
-                errorMessage = "Avatar has no expressions menu.";
-                m_installLog.Add(
-                    $"e|{errorMessage}");
-                throw new InvalidOperationException(errorMessage);
+                // Use blank expressions menu
+                var blankMenuPath = $"Assets/{m_avatar.name}_Menu.asset";
+                AssetDatabase.CopyAsset(Path.Combine(INSTALLER_RESOURCES_PATH, "BlankMenu.asset"), blankMenuPath);
+                AssetDatabase.Refresh();
+                m_avatar.expressionsMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(blankMenuPath);
+                avatarExpressionsMenu = m_avatar.expressionsMenu;
             }
 
             // Get the asset expressions menu
@@ -996,6 +1016,7 @@ namespace Okaeri.Editor
             {
                 errorMessage = "No space for additional menu controls available.";
                 m_installLog.Add($"e|{errorMessage}");
+                EditorUtility.DisplayDialog("Error", errorMessage, "Ok");
                 throw new InvalidOperationException(errorMessage);
             }
 
@@ -1181,7 +1202,7 @@ namespace Okaeri.Editor
                     "Okaeri Asset Installer", 
                     $"{assetConfig.AssetName} has been successfully installed on {m_avatar.name}!\n\n" + 
                     "The next step will guide you into correctly positioning and scaling the asset items.", 
-                    "Ok", "I will do that manually");
+                    "Continue");
             }
         }
 
@@ -1513,7 +1534,7 @@ namespace Okaeri.Editor
         {
             m_initialSelectedGameObject = Selection.activeGameObject;
             m_initialTool = Tools.current;
-            if (GUILayout.Button("Done", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
+            if (GUILayout.Button("FINISH INSTALL", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
             {
                 Selection.activeGameObject = m_initialSelectedGameObject;
                 Tools.current = m_initialTool;
@@ -1537,8 +1558,8 @@ namespace Okaeri.Editor
             };
 
             // Get the items
-            if (m_assetItem == null)
-            {
+            //if (m_assetItem == null)
+            //{
                 m_assetItem = GetAssetItemOnAvatar(m_selectedAssetConfig);
                 if (m_assetItem == null)
                 {
@@ -1548,7 +1569,7 @@ namespace Okaeri.Editor
                     GUILayout.FlexibleSpace();
                     return;
                 }
-            }
+            //}
             m_assetItem.gameObject.SetActive(true);
 
             var itemsParent = m_selectedAssetConfig.AssetItemName;
@@ -1568,8 +1589,8 @@ namespace Okaeri.Editor
             }
 
             // Draw the layouts
-            EditorGUILayout.LabelField("Move / Rotate asset items:", titleStyle);
-            EditorGUILayout.HelpBox("It's very important to only change the Position and Rotation of the items selected!", MessageType.Warning);
+            EditorGUILayout.LabelField("MOVE / ROTATE:", titleStyle);
+            EditorGUILayout.HelpBox("It is very important to only change the POSITION and ROTATION of the items selected!", MessageType.Warning);
             GUILayout.Space(8);
             foreach (var item in m_itemsToMoveRotate)
             {
@@ -1578,8 +1599,8 @@ namespace Okaeri.Editor
 
             GUILayout.Space(16);
 
-            EditorGUILayout.LabelField("Scale asset items:", titleStyle);
-            EditorGUILayout.HelpBox("It's very important to only change the Scale of the items selected!", MessageType.Warning);
+            EditorGUILayout.LabelField("SCALE:", titleStyle);
+            EditorGUILayout.HelpBox("It is very important to only change the SCALE of the items selected!", MessageType.Warning);
             GUILayout.Space(8);
             foreach (var item in m_itemsToScale)
             {
@@ -1650,6 +1671,8 @@ namespace Okaeri.Editor
 
         #endregion
 
+        #region Uninstaller Logic
+
         /// <summary>
         /// Removes the selected Okaeri asset from the current avatar.
         /// </summary>
@@ -1665,6 +1688,17 @@ namespace Okaeri.Editor
             {
                 m_installLog.Add($"i|\t\t{assetItem.name}");
                 DestroyImmediate(assetItem.gameObject);
+            }
+
+            // Remove the Items gameobject if empty
+            var avatarTransform = m_avatar.gameObject.transform;
+            var avatarItems = avatarTransform.Find("Items");
+            if (avatarItems != null)
+            {
+                if (avatarItems.GetComponentsInChildren<Transform>(true).Length <= 1)
+                {
+                    DestroyImmediate(avatarItems.gameObject);
+                }
             }
 
             // Remove the FX animator layers and parameters
@@ -1711,6 +1745,7 @@ namespace Okaeri.Editor
                     m_avatar.expressionParameters.parameters.Where(p => cleanAvatarExpressionParametersNames.Contains(p.name)).ToArray();
             }
         }
+        #endregion
 
     }
 }
