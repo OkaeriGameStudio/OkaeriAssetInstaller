@@ -19,7 +19,7 @@ jobs:
         
       - name: YAML to JSON
         run: |
-          for file in /Editor/Installer/Configs/*.asset; do
+          for file in Editor/Installer/Configs/*.asset; do
             cat "$file" >> configs-$(basename "$file").asset
           done
           cat configs-*.asset | jq -s '.' > configs.json
