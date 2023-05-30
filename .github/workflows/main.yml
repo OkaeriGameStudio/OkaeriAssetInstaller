@@ -25,8 +25,8 @@ jobs:
           for file in Editor/Installer/Configs/*.asset; do
             name=$(basename "$file")
             content=$(cat "$file" | awk '{gsub(/\\/, "\\\\\\\\"); gsub(/"/, "\\\""); printf "%s\\n", $0}')
-            crc=$(cat "$file" | cksum | awk '{print $1}')
-            echo "{\"name\": \"$name\", \"content\": \"$content\", \"crc\": \"crc32:$crc\"}," >> output.json
+            crc=$(md5sum "$file" | awk '{print $1}')
+            echo "{\"name\": \"$name\", \"content\": \"$content\", \"crc\": \"$crc\"}," >> output.json
           done
           echo "{}]}" >> output.json
           cat output.json | jq 'del(.[] | select(. == {}))' > configs.json
