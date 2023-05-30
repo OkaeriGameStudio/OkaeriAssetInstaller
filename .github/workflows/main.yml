@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v2
         
       - name: JQ
         run: sudo apt-get install jq
@@ -20,7 +20,7 @@ jobs:
       - name: YAML to JSON
         run: |
           for file in Editor/Installer/Configs/*.asset; do
-            cat "$file" >> configs.asset
+            cat "$file" >> configs-$(basename "$file").asset
           done
-          cat configs.asset | jq -s '.' > configs.json
+          cat configs-*.asset | jq -s '.' > configs.json
           
