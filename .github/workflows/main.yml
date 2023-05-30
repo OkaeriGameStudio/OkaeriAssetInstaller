@@ -1,24 +1,24 @@
 name: Generates Update
 
 on:
-#  pull_request:
-#    types:
-#      - closed
+  #  pull_request:
+  #    types:
+  #      - closed
   workflow_dispatch:
 
 jobs:
   build:
-#    if: github.event.pull_request.merged == true
+    #    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-        
+
       - name: JQ and COREUTILS
         run: |
           sudo apt-get install jq
           sudo apt-get install coreutils
-        
+
       - name: CONFIGS to JSON
         run: |
           echo "[" > output.json
@@ -30,4 +30,10 @@ jobs:
           done
           echo "{}]" >> output.json
           cat output.json | jq 'del(.[] | select(. == {}))' > configs.json
+
+      - name: Generate Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: configs
+          path: configs.json
           
