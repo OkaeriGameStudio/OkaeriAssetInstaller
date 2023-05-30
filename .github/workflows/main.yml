@@ -17,10 +17,15 @@ jobs:
       - name: JQ
         run: sudo apt-get install jq
         
-      - name: YAML to JSON
+      - name: CONFIGS to JSON
         run: |
+          echo "[" > output.json
           for file in Editor/Installer/Configs/*.asset; do
-            cat "$file" >> configs-$(basename "$file").asset
+            name=$(basename "$file")
+            content=$(cat "$file" | awk '{printf "%s\\n", $0}')
+            crc=$(crc32 "$file")
+            echo "{\"name\": \"$name\", \"content\": \"$content\", \"crc\": \"$crc\"}," >> output.json
           done
-          cat configs-*.asset | jq -s '.' > configs.json
+          echo "{}]" >> output.json
+          cat output.json | jq 'del(.[] | select(. == {}))' > configs.json
           
