@@ -6,7 +6,6 @@ using System.IO;
 using System.Linq;
 using System.Management.Instrumentation;
 using System.Net.Http;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,7 +15,6 @@ using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRLabs.AV3Manager;
-using Debug = UnityEngine.Debug;
 
 namespace Okaeri.Editor
 {
