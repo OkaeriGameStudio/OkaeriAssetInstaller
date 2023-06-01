@@ -1,4 +1,4 @@
-//VERSION1.0.5
+//VERSION1.0.6
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Management.Instrumentation;
 using System.Net.Http;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,9 +16,91 @@ using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRLabs.AV3Manager;
+using Debug = UnityEngine.Debug;
 
 namespace Okaeri.Editor
 {
+    public class OkaeriAssetConfigValidator
+    {
+        /// <summary>
+        /// Determines if the provided Okaeri asset configuration is valid.
+        /// </summary>
+        /// <param name="config">The Okaeri asset configuration to check.</param>
+        /// <param name="errorMessage">The validation error message.</param>
+        /// <returns>True if the Okaeri asset configuration is valid.</returns>
+        public static bool IsValid(OkaeriAssetConfig config, out string errorMessage)
+        {
+            // Initialize the errors list
+            var errors = new List<string>();
+
+            // Check the asset configuration object
+            if (config != null)
+            {
+                // Check the fields
+                var assetConfigFields = config.GetType().GetFields();
+                foreach (var assetConfigField in assetConfigFields)
+                {
+                    // Check the field type
+                    if (assetConfigField.FieldType != typeof(string))
+                    {
+                        continue;
+                    }
+
+                    // Check the field value
+                    errors.Add(string.IsNullOrWhiteSpace((string)assetConfigField.GetValue(config))
+                        ? $"Invalid or empty {assetConfigField.Name}"
+                        : "");
+                }
+
+                // Check the paths
+                if (!string.IsNullOrWhiteSpace(config.PrefabName))
+                {
+                    var prefabPath = Path.Combine(config.AssetPath, config.PrefabName);
+                    errors.Add(File.Exists(prefabPath) ? "" : $"Prefab cannot be found at {prefabPath}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(config.AssetFXAnimatorWDOff))
+                {
+                    var wdOffAnimatorPath = Path.Combine(config.AssetPath, config.AssetFXAnimatorWDOff);
+                    errors.Add(File.Exists(wdOffAnimatorPath) ? "" : $"FX animator (WD OFF) cannot be found at {wdOffAnimatorPath}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(config.AssetFXAnimatorWDOn))
+                {
+                    var wdOnAnimatorPath = Path.Combine(config.AssetPath, config.AssetFXAnimatorWDOn);
+                    errors.Add(File.Exists(wdOnAnimatorPath) ? "" : $"FX animator (WD ON) cannot be found at {wdOnAnimatorPath}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(config.AssetExpressionParams))
+                {
+                    var expressionParamsPath = Path.Combine(config.AssetPath, config.AssetExpressionParams);
+                    errors.Add(File.Exists(expressionParamsPath) ? "" : $"Expression parameters cannot be found at {expressionParamsPath}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(config.AssetExpressionsMenu))
+                {
+                    var expressionsMenuPath = Path.Combine(config.AssetPath, config.AssetExpressionsMenu);
+                    errors.Add(File.Exists(expressionsMenuPath) ? "" : $"Expressions menu cannot be found at {expressionsMenuPath}");
+                }
+            }
+            else
+            {
+                errors.Add("Invalid asset configuration: NULL");
+            }
+
+            // Return the result
+            errorMessage = string.Join(Environment.NewLine, errors.Where(e => !string.IsNullOrWhiteSpace(e)));
+            return string.IsNullOrWhiteSpace(errorMessage);
+        }
+    }
+
+    public enum OkaeriAssetInstallerView
+    {
+        None,
+        Install,
+        Configure
+    }
+
     public class OkaeriAssetInstaller : EditorWindow
     {
         /// <summary>
@@ -333,39 +416,9 @@ namespace Okaeri.Editor
         #region Installer Window
 
         /// <summary>
-        /// Determines if we can install stuff.
+        /// The installer view to display.
         /// </summary>
-        private bool m_canInstall;
-
-        /// <summary>
-        /// Determines if the installer is installing an asset.
-        /// </summary>
-        private bool m_installing;
-
-        /// <summary>
-        /// Determines if the installer is positioning the asset.
-        /// </summary>
-        private bool m_moveRotateScale;
-
-        /// <summary>
-        /// The asset installation log.
-        /// </summary>
-        private readonly List<string> m_installLog = new List<string>();
-
-        /// <summary>
-        /// The asset installation log scroll.
-        /// </summary>
-        private Vector2 m_installLogScroll = Vector2.zero;
-
-        /// <summary>
-        /// The list of available Okaeri assets.
-        /// </summary>
-        private string[] m_assetNames;
-
-        /// <summary>
-        /// The selected asset configuration.
-        /// </summary>
-        private OkaeriAssetConfig m_selectedAssetConfig;
+        private OkaeriAssetInstallerView m_installerView = OkaeriAssetInstallerView.Install;
 
         /// <summary>
         /// The avatar to install the asset on.
@@ -375,17 +428,32 @@ namespace Okaeri.Editor
         /// <summary>
         /// The animator from the selected avatar.
         /// </summary>
-        private Animator m_animator;
+        private Animator m_avatarAnimator;
 
         /// <summary>
-        /// Determines if the asset configurations are valid.
+        /// The selected asset configuration.
         /// </summary>
-        private bool m_validConfigs;
+        private OkaeriAssetConfig m_selectedAssetConfig;
 
         /// <summary>
-        /// Determines if the selected avatar is valid.
+        /// Determines if the asset package is installed in the current project.
         /// </summary>
-        private bool m_validAvatar;
+        private bool m_assetPackageInstalled;
+
+        /// <summary>
+        /// Determines if the asset has already been installed on the current avatar.
+        /// </summary>
+        private bool m_assetInstalled;
+
+        /// <summary>
+        /// The asset install log.
+        /// </summary>
+        private readonly List<string> m_installLog = new List<string>();
+
+        /// <summary>
+        /// The asset install log scrollview.
+        /// </summary>
+        private Vector2 m_installLogScroll = Vector2.zero;
 
         /// <summary>
         /// The Discord icon to use in the footer.
@@ -413,18 +481,18 @@ namespace Okaeri.Editor
             // Header
             DrawBanner();
 
-            // Asset configuration errors
-            DrawConfigUpdateErrors();
-            if (!m_validConfigs)
+            // Asset configuration loading errors
+            if (!string.IsNullOrWhiteSpace(m_configUpdateError))
             {
+                DrawAssetConfigurationLoadingErrors();
                 GUILayout.FlexibleSpace();
                 DrawFooter();
                 return;
             }
 
             // Avatar selection
-            DrawAvatarField();
-            if (!m_validAvatar)
+            GUI.enabled = m_installerView != OkaeriAssetInstallerView.Configure;
+            if (!DrawAvatarSelectionField())
             {
                 GUILayout.FlexibleSpace();
                 DrawFooter();
@@ -433,23 +501,34 @@ namespace Okaeri.Editor
 
             // Asset configuration selection
             DrawAssetConfigurationSelection();
+            GUI.enabled = true;
 
-            // Check what controls we show
-            if (m_canInstall)
-            {
-                if (m_moveRotateScale)
-                {
-                    DrawAssetMoveRotateScale();
-                }
-                else
-                {
-                    DrawAssetInstallOptions();
-                    DrawAssetInstallLog();
-                }
-            }
-            else
+            // Check if the asset package is installed
+            if (!m_assetPackageInstalled)
             {
                 GUILayout.FlexibleSpace();
+                DrawFooter();
+                return;
+            }
+
+            // Draw the appropriate view
+            switch (m_installerView)
+            {
+                case OkaeriAssetInstallerView.Install:
+                    DrawInstallOptions();
+                    DrawInstallButtons();
+                    DrawInstallLog();
+                    break;
+
+                case OkaeriAssetInstallerView.Configure:
+                    DrawSaveConfigurationButton("SAVE CONFIGURATION", Color.green);
+                    DrawAssetConfigurationOptions();
+                    GUILayout.FlexibleSpace();
+                    break;
+
+                case OkaeriAssetInstallerView.None:
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
 
             // Footer
@@ -457,21 +536,13 @@ namespace Okaeri.Editor
         }
 
         /// <summary>
-        /// Draws an error / warning box if the latest asset configurations weren't properly initialized.
+        /// Draws an error / warning box if the asset configurations weren't properly initialized.
         /// </summary>
-        private void DrawConfigUpdateErrors()
+        private void DrawAssetConfigurationLoadingErrors()
         {
-            // Check for ok
-            if (string.IsNullOrWhiteSpace(m_configUpdateError))
-            {
-                m_validConfigs = true;
-                return;
-            }
-
             // Check for initialization
             if (m_configUpdateError.Equals("!"))
             {
-                m_validConfigs = false;
                 return;
             }
 
@@ -481,69 +552,48 @@ namespace Okaeri.Editor
 
             // Show the appropriate message
             EditorGUILayout.HelpBox(errorMessageParts[1], messageType, true);
-            m_validConfigs = false;
         }
 
         /// <summary>
         /// Draws the avatar selection field.
         /// </summary>
-        private void DrawAvatarField()
+        /// <returns>True if the selected avatar is valid.</returns>
+        private bool DrawAvatarSelectionField()
         {
             // Draw the field and check for changes
             EditorGUI.BeginChangeCheck();
-            m_avatar = EditorGUILayout.ObjectField("Avatar:", m_avatar, typeof(VRCAvatarDescriptor), true) as VRCAvatarDescriptor;
+            m_avatar = (VRCAvatarDescriptor)EditorGUILayout.ObjectField("Avatar:", m_avatar, typeof(VRCAvatarDescriptor), true);
 
             // Check if the avatar has been set
             if (m_avatar == null)
             {
-                m_validAvatar = false;
                 EditorGUILayout.HelpBox("Please select the VRC Avatar to install the assets on.", MessageType.Info);
-                return;
+                return false;
             }
 
             // Check for changes to the avatar
             if (!EditorGUI.EndChangeCheck())
             {
-                return;
+                return true;
             }
 
             // Check if the avatar has an animator
-            m_animator = m_avatar.gameObject.GetComponent<Animator>();
-            if (m_animator == null)
+            m_avatarAnimator = m_avatar.gameObject.GetComponent<Animator>();
+            if (m_avatarAnimator == null)
             {
-                m_validAvatar = false;
                 EditorGUILayout.HelpBox("No Animator component found on the selected avatar.", MessageType.Error);
-                return;
+                return false;
             }
 
             // Check if the animator is humanoid
-            if (!m_animator.isHuman)
+            if (!m_avatarAnimator.isHuman)
             {
-                m_validAvatar = false;
                 EditorGUILayout.HelpBox("Selected avatar doesn't have a humanoid rig.", MessageType.Error);
-                return;
+                return false;
             }
 
-            // Set the flag
-            m_validAvatar = true;
-        }
-
-        /// <summary>
-        /// Draws the Okaeri asset configuration selection dropdown.
-        /// </summary>
-        private void DrawAssetConfigDropdown()
-        {
-            // Initialize the list of asset names
-            m_assetNames = m_localConfigs.Values.Select(c => c.AssetName).ToArray();
-
-            // Select the asset configuration
-            var selectedAssetIndex = m_selectedAssetConfig == null
-                ? 0
-                : Array.IndexOf(m_assetNames, m_selectedAssetConfig.AssetName);
-            selectedAssetIndex = EditorGUILayout.Popup("Asset to install:", selectedAssetIndex, m_assetNames);
-
-            var selectedAssetName = m_assetNames[selectedAssetIndex];
-            m_selectedAssetConfig = m_localConfigs.Values.First(c => c.AssetName.Equals(selectedAssetName));
+            // Avatar should be valid
+            return true;
         }
 
         /// <summary>
@@ -554,11 +604,13 @@ namespace Okaeri.Editor
             // Check if we have any configurations to draw.
             if (m_localConfigs == null || m_localConfigs.Count == 0)
             {
+                EditorGUILayout.HelpBox("No asset configurations found.\nPlease re-open the Okaeri asset installer window!", MessageType.Error);
                 return;
             }
 
+            // Draw the asset configuration selection
             EditorGUILayout.BeginHorizontal();
-            DrawAssetConfigDropdown();
+            DrawAssetConfigurationSelectionDropdown();
             if (GUILayout.Button(EditorGUIUtility.IconContent("Refresh", "Refresh asset configurations"), GUILayout.Width(32), GUILayout.Height(18)))
             {
                 LoadAssetConfigurations();
@@ -580,21 +632,60 @@ namespace Okaeri.Editor
                 }
 
                 EditorGUILayout.EndHorizontal();
-                m_canInstall = false;
+                m_assetInstalled = false;
+                m_assetPackageInstalled = false;
                 return;
             }
+
+            // Check if the asset configuration is valid
+            var validationErrorMessage = string.Empty;
+            if (!OkaeriAssetConfigValidator.IsValid(m_selectedAssetConfig, out validationErrorMessage))
+            {
+                EditorGUILayout.HelpBox(
+                    $"\nInvalid asset configuration:\n\n" +
+                    $"{validationErrorMessage}\n\n" +
+                    $"Please contact us on Discord!\n",
+                    MessageType.Error);
+                m_assetPackageInstalled = false;
+                m_assetInstalled = false;
+                return;
+            }
+
+            // Verify if the asset is already installed on the avatar
+            var assetAlreadyInstalledMessage = string.Empty;
+            m_assetInstalled = IsAssetInstalled(m_selectedAssetConfig, out assetAlreadyInstalledMessage);
 
             // Show the asset package location
             EditorGUILayout.HelpBox($"{m_selectedAssetConfig.AssetName} asset found at {m_selectedAssetConfig.AssetPath}", MessageType.None);
             GUILayout.Space(8);
-            m_canInstall = true;
+            m_assetPackageInstalled = true;
+        }
+
+        /// <summary>
+        /// Draws the Okaeri asset configuration selection dropdown.
+        /// </summary>
+        private void DrawAssetConfigurationSelectionDropdown()
+        {
+            // Initialize the list of asset names
+            var assetNames = m_localConfigs.Values.Select(c => c.AssetName).ToArray();
+
+            // Select the asset configuration
+            var selectedAssetIndex = m_selectedAssetConfig == null
+                ? 0
+                : Array.IndexOf(assetNames, m_selectedAssetConfig.AssetName);
+            selectedAssetIndex = Mathf.Clamp(selectedAssetIndex, 0, assetNames.Length - 1);
+            selectedAssetIndex = EditorGUILayout.Popup("Asset to install:", selectedAssetIndex, assetNames);
+
+            var selectedAssetName = assetNames[selectedAssetIndex];
+            m_selectedAssetConfig = m_localConfigs.Values.First(c => c.AssetName.Equals(selectedAssetName));
         }
 
         /// <summary>
         /// Draws the asset install options.
         /// </summary>
-        private void DrawAssetInstallOptions()
+        private void DrawInstallOptions()
         {
+            // Draw the install options title
             var titleStyle = new GUIStyle(EditorStyles.largeLabel)
             {
                 fontStyle = FontStyle.Bold
@@ -602,24 +693,58 @@ namespace Okaeri.Editor
             EditorGUILayout.LabelField("Install Options:", titleStyle);
             GUILayout.Space(8);
 
-            // Add install options
+            // Draw asset items options
             GUI.enabled = false;
             m_installItems = EditorGUILayout.ToggleLeft("Install Asset Items", m_installItems, GUILayout.ExpandWidth(true));
+
+            // Draw animator install options
             m_installAnimator = EditorGUILayout.ToggleLeft("Install Animator", m_installAnimator, GUILayout.ExpandWidth(true));
             if (m_installAnimator)
             {
                 var guiEnabled = GUI.enabled;
-                GUI.enabled = m_installAnimator;
+                GUI.enabled = true;
+
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Space(20);
-                m_fxAnimatorWD = EditorGUILayout.ToggleLeft("Write Defaults ON", m_fxAnimatorWD,
-                    GUILayout.ExpandWidth(true));
+                m_fxAnimatorWD = EditorGUILayout.ToggleLeft("Write Defaults ON", m_fxAnimatorWD, GUILayout.ExpandWidth(true));
                 EditorGUILayout.EndHorizontal();
+
                 GUI.enabled = guiEnabled;
             }
+
+            // Draw expression parameters options
             m_installParameters = EditorGUILayout.ToggleLeft("Install VRC Parameters", m_installParameters, GUILayout.ExpandWidth(true));
-            GUI.enabled = !m_installing;
+
+            // Draw expressions menu options
+            GUI.enabled = true;
             m_installMenu = EditorGUILayout.ToggleLeft("Install VRC Menu", m_installMenu, GUILayout.ExpandWidth(true));
+        }
+
+        /// <summary>
+        /// Draws the asset install buttons.
+        /// </summary>
+        private void DrawInstallButtons()
+        {
+            // Check if the asset is already installed
+            if (m_assetInstalled)
+            {
+                // Draw the asset configuration button
+                if (GUILayout.Button($"Configure {m_selectedAssetConfig.AssetName}'s Items", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
+                {
+                    m_installerView = OkaeriAssetInstallerView.Configure;
+                    return;
+                }
+
+                // Draw the uninstall button
+                if (GUILayout.Button($"Uninstall {m_selectedAssetConfig.AssetName}", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
+                {
+                    m_installLog.Clear();
+                    UninstallAsset(m_selectedAssetConfig);
+                    m_assetInstalled = false;
+                }
+
+                return;
+            }
 
             // Draw the install button
             if (GUILayout.Button($"Install {m_selectedAssetConfig.AssetName}", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
@@ -629,31 +754,14 @@ namespace Okaeri.Editor
                 PreInstalChecks(m_selectedAssetConfig);
 
                 // Install
-                m_installing = true;
                 InstallAsset(m_selectedAssetConfig);
             }
-
-            // Draw the move / rotate button
-            if (GUILayout.Button($"Reposition {m_selectedAssetConfig.AssetName}'s Items", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
-            {
-                m_moveRotateScale = true;
-                DrawAssetMoveRotateScale();
-                //return;
-            }
-
-            // Draw the uninstall button
-            if (GUILayout.Button($"Uninstall {m_selectedAssetConfig.AssetName}", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
-            {
-                m_installLog.Clear();
-                UninstallAsset(m_selectedAssetConfig);
-            }
-            GUI.enabled = true;
         }
 
         /// <summary>
         /// Draws the asset install log.
         /// </summary>
-        private void DrawAssetInstallLog()
+        private void DrawInstallLog()
         {
             // Get the log text
             const string logPrefix = ">  ";
@@ -731,46 +839,105 @@ namespace Okaeri.Editor
         #region Installer Checks
 
         /// <summary>
+        /// Creates an empty or default asset of the specified type.
+        /// </summary>
+        /// <typeparam name="T">The type of blank or empty asset to create.</typeparam>
+        /// <param name="assetPath">The name of the blank asset to create.</param>
+        /// <returns>The created blank or empty asset of the specified type.</returns>
+        private T CreateBlankAsset<T>(string assetPath) where T: UnityEngine.Object
+        {
+            // Initialize the asset name
+            var blankAssetName = string.Empty;
+
+            // No pattern matching so we're stuck with this :/
+            if (typeof(T) == typeof(VRCExpressionsMenu))
+            {
+                blankAssetName = "BlankMenu.asset";
+            }
+            if (typeof(T) == typeof(VRCExpressionParameters))
+            {
+                blankAssetName = "BlankParameters.asset";
+            }
+            if (typeof(T) == typeof(AnimatorController))
+            {
+                blankAssetName = "BlankFX.controller";
+            }
+
+            // Check if we matched an asset name
+            if (string.IsNullOrWhiteSpace(blankAssetName))
+            {
+                throw new InvalidDataException("Could not find a blank asset for the specified asset type.");
+            }
+            
+            // Create the blank or empty asset
+            var blankAssetPath = Path.Combine(INSTALLER_RESOURCES_PATH, blankAssetName);
+            AssetDatabase.CopyAsset(blankAssetPath, assetPath);
+            AssetDatabase.Refresh();
+            return AssetDatabase.LoadAssetAtPath<T>(assetPath);
+        }
+
+        /// <summary>
+        /// Determines if the specified Okaeri asset is installed on the currently selected avatar.
+        /// </summary>
+        /// <param name="assetConfig">The Okaeri asset configuration.</param>
+        /// <param name="errorMessage">The error message to show in case the asset is installed.</param>
+        /// <returns>.</returns>
+        private bool IsAssetInstalled(OkaeriAssetConfig assetConfig, out string errorMessage)
+        {
+            // Search for asset items on the current avatar
+            var errors = new List<string>();
+            var assetsOnAvatar = GetAssetItemsOnAvatar(assetConfig);
+            if (assetsOnAvatar?.Length > 0)
+            {
+                errors.Add("Asset items are already installed.");
+            }
+
+            // Search for FX animator layers and parameters
+            var assetAnimLayersAndParametersOnAvatar = GetAssetAnimatorLayersAndParametersOnAvatar(assetConfig);
+            if (assetAnimLayersAndParametersOnAvatar.Item1?.Length > 0)
+            {
+                errors.Add("Avatar FX animator already contains some layers from the asset.");
+            }
+            if (assetAnimLayersAndParametersOnAvatar.Item2?.Length > 0)
+            {
+                errors.Add("Avatar FX animator already contains some parameters from the asset.");
+            }
+            
+            // Search for expression parameters
+            var assetExpressionParametersOnAvatar = GetAssetExpressionParametersOnAvatar(assetConfig);
+            if (assetExpressionParametersOnAvatar?.Length > 0)
+            {
+                errors.Add("Avatar already has some asset expression parameters.");
+            }
+
+            // Search for expressions menu
+            var assetExpressionsMenuOnAvatar = IsAssetExpressionsMenuOnAvatar(assetConfig);
+            if (assetExpressionsMenuOnAvatar)
+            {
+                errors.Add("Avatar already has the expressions menu installed.");
+            }
+
+            // Set the error message
+            errorMessage = string.Join(Environment.NewLine, errors);
+
+            // Return the result
+            return !string.IsNullOrWhiteSpace(errorMessage);
+        }
+
+        /// <summary>
         /// Perform some sanity checks before installation.
         /// </summary>
         private void PreInstalChecks(OkaeriAssetConfig assetConfig)
         {
-            string errorMessage;
             m_installLog.Add("i|Performing pre-install checks");
 
             // Check if the given configuration is valid
             m_installLog.Add("i|\tValidating asset configuration");
             if (assetConfig == null)
             {
-                errorMessage = "Cannot install the specified Okaeri asset configuration: Invalid or empty asset configuration.";
+                var errorMessage = "Cannot install the specified Okaeri asset configuration: Invalid or empty asset configuration.";
                 m_installLog.Add($"e|{errorMessage}");
                 throw new ArgumentNullException(errorMessage);
-            }
-
-            // Check if the asset is already installed on the avatar
-            m_installLog.Add("i|\tChecking if asset items are already installed on the avatar");
-            var assetItemsOnAvatar = GetAssetItemsOnAvatar(assetConfig);
-            if (assetItemsOnAvatar.Length > 0)
-            {
-                errorMessage = $"Cannot install {assetConfig.AssetName}: Asset items are already installed.";
-                m_installLog.Add($"e|{errorMessage}");
-                throw new InvalidOperationException(errorMessage);
-            }
-
-            // Check if the animator already has some of the asset layers
-            m_installLog.Add("i|\tChecking avatar animator layers and parameters");
-            var assetAnimLayersAndParametersOnAvatar = GetAssetAnimatorLayersAndParametersOnAvatar(assetConfig);
-            if (assetAnimLayersAndParametersOnAvatar.Item1.Length > 0)
-            {
-                errorMessage = $"Cannot install {assetConfig.AssetName}: Avatar FX animator already contains some layers from the asset.";
-                m_installLog.Add($"e|{errorMessage}");
-                throw new InvalidOperationException(errorMessage);
-            }
-            if (assetAnimLayersAndParametersOnAvatar.Item2.Length > 0)
-            {
-                errorMessage = $"Cannot install {assetConfig.AssetName}: Avatar FX animator already contains some parameters from the asset.";
-                m_installLog.Add($"e|{errorMessage}");
-                throw new InvalidOperationException(errorMessage);
             }
 
             // Check if the parameters can be installed on the avatar
@@ -820,14 +987,14 @@ namespace Okaeri.Editor
         /// Gets the asset item on avatar.
         /// </summary>
         /// <returns></returns>
-        private Transform GetAssetItemOnAvatar(OkaeriAssetConfig assetConfig)
+        private GameObject GetAssetItemOnAvatar(OkaeriAssetConfig assetConfig)
         {
             var avatarItems = m_avatar.transform.Find("Items");
             if (avatarItems == null)
             {
                 throw new InstanceNotFoundException("Did not find the Items object on the current avatar.");
             }
-            return avatarItems.Find(assetConfig.AssetItemName);
+            return avatarItems.Find(assetConfig.AssetItemName).gameObject;
         }
 
         /// <summary>
@@ -836,16 +1003,17 @@ namespace Okaeri.Editor
         /// <returns></returns>
         private int GetAvatarFxAnimationLayerIndex()
         {
-            var result = -1;
+            // Get the layer from the avatar
             for (var i = 0; i < m_avatar.baseAnimationLayers.Length; ++i)
             {
                 if (m_avatar.baseAnimationLayers[i].type.Equals(VRCAvatarDescriptor.AnimLayerType.FX))
                 {
-                    result = i;
-                    break;
+                    return i;
                 }
             }
-            return result;
+
+            // Return invalid index
+            return -1;
         }
 
         /// <summary>
@@ -866,11 +1034,8 @@ namespace Okaeri.Editor
             if (avatarFxAnimController == null)
             {
                 // Use blank FX controller
-                var blankFXControllerPath = $"Assets/{m_avatar.name}_FX.controller";
-                AssetDatabase.CopyAsset(Path.Combine(INSTALLER_RESOURCES_PATH, "BlankFX.controller"), blankFXControllerPath);
-                AssetDatabase.Refresh();
-                m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController = AssetDatabase.LoadAssetAtPath<AnimatorController>(blankFXControllerPath);
-                avatarFxAnimController = m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController as AnimatorController;
+                m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController = CreateBlankAsset<AnimatorController>($"Assets/{m_avatar.name}_FX.controller");
+                avatarFxAnimController = (AnimatorController)m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController;
             }
 
             var avatarFxAnimLayersNames = avatarFxAnimController.layers.Select(l => l.name);
@@ -911,6 +1076,13 @@ namespace Okaeri.Editor
         private string[] GetAssetExpressionParametersOnAvatar(OkaeriAssetConfig assetConfig)
         {
             // Get the avatar expression parameters
+            if (m_avatar.expressionParameters == null ||
+                m_avatar.expressionParameters.parameters == null || 
+                m_avatar.expressionParameters.parameters.Length == 0)
+            {
+                // No avatar parameters
+                return Array.Empty<string>();
+            }
             var avatarExpressionParameters = m_avatar.expressionParameters.parameters.Select(p => p.name);
 
             // Get the asset expression parameters
@@ -932,18 +1104,6 @@ namespace Okaeri.Editor
         {
             string errorMessage;
 
-            // Get the avatar expression parameters
-            var avatarExpressionParameters = m_avatar.expressionParameters;
-            if (avatarExpressionParameters == null)
-            {
-                // Use blank expression parameters
-                var blankParametersPath = $"Assets/{m_avatar.name}_Parameters.asset";
-                AssetDatabase.CopyAsset(Path.Combine(INSTALLER_RESOURCES_PATH, "BlankParameters.asset"), blankParametersPath);
-                AssetDatabase.Refresh();
-                m_avatar.expressionParameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(blankParametersPath);
-                avatarExpressionParameters = m_avatar.expressionParameters;
-            }
-
             // Get the asset expression parameters
             var assetExpressionParametersPath =
                 m_selectedAssetConfig.AssetPath + "/" + m_selectedAssetConfig.AssetExpressionParams;
@@ -954,6 +1114,15 @@ namespace Okaeri.Editor
                 errorMessage = "Asset has no expression parameters object.";
                 m_installLog.Add($"e|{errorMessage}");
                 throw new InvalidOperationException(errorMessage);
+            }
+
+            // Get the avatar expression parameters
+            var avatarExpressionParameters = m_avatar.expressionParameters;
+            if (avatarExpressionParameters == null)
+            {
+                // Use blank expression parameters
+                m_avatar.expressionParameters = CreateBlankAsset<VRCExpressionParameters>($"Assets/{m_avatar.name}_Parameters.asset");
+                avatarExpressionParameters = m_avatar.expressionParameters;
             }
 
             // Check if we have space for the asset parameters
@@ -973,56 +1142,62 @@ namespace Okaeri.Editor
         }
 
         /// <summary>
-        /// Checks if the asset expressions menu can be installed on the avatar.
+        /// Determines if the specified Okaeri asset VRCExpressionsMenu is present on the current avatar.
         /// </summary>
         /// <param name="assetConfig">The asset configuration.</param>
-        /// <exception cref="InvalidOperationException"></exception>
-        private void CheckExpressionsMenuSpace(OkaeriAssetConfig assetConfig)
+        /// <returns></returns>
+        private bool IsAssetExpressionsMenuOnAvatar(OkaeriAssetConfig assetConfig)
         {
-            string errorMessage;
-
-            // Get the avatar expressions menu
-            var avatarExpressionsMenu = m_avatar.expressionsMenu;
-            if (avatarExpressionsMenu == null)
+            // Get the expressions menu on the avatar
+            if (m_avatar.expressionsMenu == null ||
+                m_avatar.expressionsMenu.controls.Count == 0)
             {
-                // Use blank expressions menu
-                var blankMenuPath = $"Assets/{m_avatar.name}_Menu.asset";
-                AssetDatabase.CopyAsset(Path.Combine(INSTALLER_RESOURCES_PATH, "BlankMenu.asset"), blankMenuPath);
-                AssetDatabase.Refresh();
-                m_avatar.expressionsMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(blankMenuPath);
-                avatarExpressionsMenu = m_avatar.expressionsMenu;
+                return false;
             }
 
             // Get the asset expressions menu
             var assetExpressionsMenuPath =
                 m_selectedAssetConfig.AssetPath + "/" + m_selectedAssetConfig.AssetExpressionsMenu;
             var assetExpressionsMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(assetExpressionsMenuPath);
-            if (assetExpressionsMenu == null)
+
+            // Search for the asset expressions menu
+            return FindExpressionsMenuOnAvatar(assetExpressionsMenu, m_avatar.expressionsMenu) != null;
+        }
+
+        /// <summary>
+        /// Searchers for the asset VRCExpressionsMenu on the currently selected avatar.
+        /// </summary>
+        /// <param name="assetMenu">The asset menu to search for..</param>
+        /// <param name="avatarMenu">The avatar menu to search in.</param>
+        /// <returns></returns>
+        private VRCExpressionsMenu FindExpressionsMenuOnAvatar(VRCExpressionsMenu assetMenu, VRCExpressionsMenu avatarMenu)
+        {
+            // Check the arguments
+            if (assetMenu == null || avatarMenu == null)
             {
-                errorMessage = "Asset has no expressions menu.";
-                m_installLog.Add($"e|{errorMessage}");
-                throw new InvalidOperationException(errorMessage);
+                return null;
             }
 
-            // Check if the menu already exists
-            if (avatarExpressionsMenu.controls.Any(c => IsAssetSubmenu(c, assetExpressionsMenu)))
+            // Check the menu controls
+            var subMenus = avatarMenu.controls.Where(c => c.type == VRCExpressionsMenu.Control.ControlType.SubMenu);
+            foreach (var subMenu in subMenus)
             {
-                m_installLog.Add("i|\tAsset expressions menu already installed!");
-                return;
+                // Check if the control is the asset menu
+                if (IsAssetSubmenu(subMenu, assetMenu))
+                {
+                    return subMenu.subMenu;
+                }
+
+                // Check if the asset menu is in any submenus
+                var menuInSubMenu = FindExpressionsMenuOnAvatar(assetMenu, subMenu.subMenu);
+                if (menuInSubMenu != null)
+                {
+                    return menuInSubMenu;
+                }
             }
 
-            // Check if we can add the expressions menu
-            if (avatarExpressionsMenu.controls.Count == VRCExpressionsMenu.MAX_CONTROLS)
-            {
-                errorMessage = "No space for additional menu controls available.";
-                m_installLog.Add($"e|{errorMessage}");
-                EditorUtility.DisplayDialog("Error", errorMessage, "Ok");
-                throw new InvalidOperationException(errorMessage);
-            }
-
-            // Set the expressions menus
-            m_avatarExpressionsMenu = m_avatar.expressionsMenu;
-            m_assetExpressionsMenu = assetExpressionsMenu;
+            // Return nothing
+            return null;
         }
 
         /// <summary>
@@ -1037,6 +1212,49 @@ namespace Okaeri.Editor
                    control.type.Equals(VRCExpressionsMenu.Control.ControlType.SubMenu) &&
                    control.subMenu != null &&
                    control.subMenu.name.Equals(assetMenu.name);
+        }
+
+        /// <summary>
+        /// Checks if the asset expressions menu can be installed on the avatar.
+        /// </summary>
+        /// <param name="assetConfig">The asset configuration.</param>
+        /// <exception cref="InvalidOperationException"></exception>
+        private void CheckExpressionsMenuSpace(OkaeriAssetConfig assetConfig)
+        {
+            string errorMessage;
+
+            // Get the asset expressions menu
+            var assetExpressionsMenuPath =
+                m_selectedAssetConfig.AssetPath + "/" + m_selectedAssetConfig.AssetExpressionsMenu;
+            var assetExpressionsMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(assetExpressionsMenuPath);
+            if (assetExpressionsMenu == null)
+            {
+                errorMessage = "Asset has no expressions menu.";
+                m_installLog.Add($"e|{errorMessage}");
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            // Get the avatar expressions menu
+            var avatarExpressionsMenu = m_avatar.expressionsMenu;
+            if (avatarExpressionsMenu == null)
+            {
+                // Use blank expressions menu
+                m_avatar.expressionsMenu = CreateBlankAsset<VRCExpressionsMenu>($"Assets/{m_avatar.name}_Menu.asset");
+                avatarExpressionsMenu = m_avatar.expressionsMenu;
+            }
+
+            // Check if we can add the expressions menu
+            if (avatarExpressionsMenu.controls.Count == VRCExpressionsMenu.MAX_CONTROLS)
+            {
+                errorMessage = "No space for additional menu controls available.";
+                m_installLog.Add($"e|{errorMessage}");
+                EditorUtility.DisplayDialog("Error", errorMessage, "Ok");
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            // Set the expressions menus
+            m_avatarExpressionsMenu = m_avatar.expressionsMenu;
+            m_assetExpressionsMenu = assetExpressionsMenu;
         }
 
         #endregion
@@ -1089,11 +1307,6 @@ namespace Okaeri.Editor
         private GameObject m_assetPrefab;
 
         /// <summary>
-        /// The main asset item.
-        /// </summary>
-        private Transform m_assetItem;
-
-        /// <summary>
         /// The expression parameters from the selected avatar.
         /// </summary>
         private VRCExpressionParameters m_avatarExpressionParameters;
@@ -1139,11 +1352,12 @@ namespace Okaeri.Editor
 
 
                 // Assign the items to correct places
+                GameObject installedAssetItem = null;
                 if (m_installItems)
                 {
                     m_installLog.Add("i|Installing items on avatar");
                     AssignItemsToAvatar(assetItems);
-                    m_assetItem = GetAssetItemOnAvatar(assetConfig);
+                    installedAssetItem = GetAssetItemOnAvatar(assetConfig);
                 }
 
                 // Merge animations
@@ -1168,10 +1382,7 @@ namespace Okaeri.Editor
                 }
 
                 // Disable the item
-                if (m_assetItem != null)
-                {
-                    m_assetItem.gameObject.SetActive(false);
-                }
+                installedAssetItem?.SetActive(false);
                 success = true;
             }
             finally
@@ -1190,19 +1401,19 @@ namespace Okaeri.Editor
                     Directory.Delete(INSTALLER_TEMP_FOLDER, true);
                     AssetDatabase.Refresh();
                 }
-
-                // Reset flag
-                m_installing = false;
             }
 
             if (success)
             {
                 m_installLog.Add($"s|{assetConfig.AssetName} installed successfully!");
-                m_moveRotateScale = EditorUtility.DisplayDialog(
-                    "Okaeri Asset Installer", 
-                    $"{assetConfig.AssetName} has been successfully installed on {m_avatar.name}!\n\n" + 
-                    "The next step will guide you into correctly positioning and scaling the asset items.", 
-                    "Continue");
+                if (EditorUtility.DisplayDialog(
+                        "Okaeri Asset Installer",
+                        $"{assetConfig.AssetName} has been successfully installed on {m_avatar.name}!\n\n" +
+                        "The next step will guide you into correctly positioning and scaling the asset items.",
+                        "Continue"))
+                {
+                    m_installerView = OkaeriAssetInstallerView.Configure;
+                }
             }
         }
 
@@ -1310,7 +1521,7 @@ namespace Okaeri.Editor
             }
 
             // Check if the given item is already assigned on the avatar
-            var boneTransform = m_animator.GetBoneTransform(bone);
+            var boneTransform = m_avatarAnimator.GetBoneTransform(bone);
             if (boneTransform.Find(item.name) == null)
             {
                 item.SetParent(boneTransform);
@@ -1505,134 +1716,124 @@ namespace Okaeri.Editor
 
         #endregion
 
-        #region Move / Rotate / Scale Logic
+        #region Configuration Logic
 
         /// <summary>
-        /// The list of item transforms on the avatar that can be moved / rotated.
+        /// The asset item to configure.
         /// </summary>
-        private Transform[] m_itemsToMoveRotate;
+        private GameObject m_itemToConfigure;
 
         /// <summary>
-        /// The list of item transforms on the avatar that can be scaled.
+        /// The initial Editor tool before manipulating asset items.
         /// </summary>
-        private Transform[] m_itemsToScale;
-
-        /// <summary>
-        /// The initial tool before manipulating asset items.
-        /// </summary>
-        private Tool m_initialTool;
+        private Tool m_editorToolCache = Tool.None;
 
         /// <summary>
         /// The inital selected GameObject before manipulating asset items.
         /// </summary>
-        private GameObject m_initialSelectedGameObject;
+        private GameObject m_selectedGameObjectCache;
 
         /// <summary>
-        /// Draws the Okaeri asset installer move / rotate helper.
+        /// The installer asset configuration options view scroll.
         /// </summary>
-        private void DrawAssetMoveRotateScale()
+        private Vector2 m_configurationOptionsScroll = Vector2.zero;
+
+        /// <summary>
+        /// Draws the save configuration button.
+        /// </summary>
+        /// <param name="text">The text to display on the button.</param>
+        /// <param name="color">The color of the button.</param>
+        private void DrawSaveConfigurationButton(string text, Color color)
         {
-            m_initialSelectedGameObject = Selection.activeGameObject;
-            m_initialTool = Tools.current;
-            if (GUILayout.Button("FINISH INSTALL", GUILayout.Height(32), GUILayout.ExpandWidth(true)))
+            var guiBackgroundCache = GUI.backgroundColor;
+            GUI.backgroundColor = color;
+
+            if (GUILayout.Button(text, GUILayout.Height(32), GUILayout.ExpandWidth(true)))
             {
-                Selection.activeGameObject = m_initialSelectedGameObject;
-                Tools.current = m_initialTool;
+                // Disable the configured asset item
+                m_itemToConfigure?.gameObject.SetActive(false);
 
-                m_itemsToMoveRotate = null;
-                m_itemsToScale = null;
-                m_assetItem?.gameObject.SetActive(false);
-                m_moveRotateScale = false;
+                // Restore Editor tools and selections
+                Selection.activeGameObject = m_selectedGameObjectCache;
+                Tools.current = m_editorToolCache;
 
-                return;
+                // Switch back to install view
+                m_installerView = OkaeriAssetInstallerView.Install;
             }
 
-            var titleStyle = new GUIStyle(EditorStyles.largeLabel)
-            {
-                fontStyle = FontStyle.Bold
-            };
-            var labelStyle = new GUIStyle(EditorStyles.label)
-            {
-                alignment = TextAnchor.MiddleLeft,
-                padding = new RectOffset(5, 0, 0, 0)
-            };
-
-            // Get the items
-            //if (m_assetItem == null)
-            //{
-                m_assetItem = GetAssetItemOnAvatar(m_selectedAssetConfig);
-                if (m_assetItem == null)
-                {
-                    EditorGUILayout.HelpBox(
-                        $"Could not find the {m_selectedAssetConfig.AssetItemName} item on the selected avatar. Is the {m_selectedAssetConfig.AssetName} installed?",
-                        MessageType.Error);
-                    GUILayout.FlexibleSpace();
-                    return;
-                }
-            //}
-            m_assetItem.gameObject.SetActive(true);
-
-            var itemsParent = m_selectedAssetConfig.AssetItemName;
-            if (m_itemsToMoveRotate == null)
-            {
-                m_itemsToMoveRotate = m_selectedAssetConfig.MovableItems
-                    .Select(i => GetAvatarItemByPath(i, itemsParent))
-                    .Where(i => i != null)
-                    .ToArray();
-            }
-            if (m_itemsToScale == null)
-            {
-                m_itemsToScale = m_selectedAssetConfig.ScalableItems
-                    .Select(i => GetAvatarItemByPath(i, itemsParent))
-                    .Where(i => i != null)
-                    .ToArray();
-            }
-
-            // Draw the layouts
-            EditorGUILayout.LabelField("MOVE / ROTATE:", titleStyle);
-            EditorGUILayout.HelpBox("It is very important to only change the POSITION and ROTATION of the items selected!", MessageType.Warning);
+            GUI.backgroundColor = guiBackgroundCache;
             GUILayout.Space(8);
-            foreach (var item in m_itemsToMoveRotate)
-            {
-                DrawMoveScaleLayout(item, labelStyle, Tool.Move, Tool.Rotate);
-            }
-
-            GUILayout.Space(16);
-
-            EditorGUILayout.LabelField("SCALE:", titleStyle);
-            EditorGUILayout.HelpBox("It is very important to only change the SCALE of the items selected!", MessageType.Warning);
-            GUILayout.Space(8);
-            foreach (var item in m_itemsToScale)
-            {
-                DrawMoveScaleLayout(item, labelStyle, Tool.Scale);
-            }
-
-            GUILayout.FlexibleSpace();
         }
 
         /// <summary>
-        /// Draws the layout for the asset item to move / rotate / scale.
+        /// Draws the Okaeri asset installer configuration options.
         /// </summary>
-        /// <param name="item">The item to manipulate.</param>
-        /// <param name="tool">Determines the item  manipulation.</param>
-        /// <param name="labelStyle">The label style.</param>
-        private void DrawMoveScaleLayout(Transform item, GUIStyle labelStyle, params Tool[] tools)
+        private void DrawAssetConfigurationOptions()
         {
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.Label(item.name, labelStyle, GUILayout.ExpandWidth(true));
-
-            foreach (var tool in tools)
+            // Cache the editor selection and tools
+            if (m_selectedGameObjectCache == null)
             {
-                if (GUILayout.Button(tool.ToString(), GUILayout.Width(100)))
-                {
-                    Selection.activeGameObject = item.gameObject;
-                    EditorGUIUtility.PingObject(item.gameObject);
-                    Tools.current = tool;
-                }
+                m_selectedGameObjectCache = Selection.activeGameObject;
             }
 
-            EditorGUILayout.EndHorizontal();
-            GUILayout.Space(8);
+            if (m_editorToolCache == Tool.None)
+            {
+                m_editorToolCache = Tools.current;
+            }
+
+            // Get the asset item to configure
+            m_itemToConfigure = GetAssetItemOnAvatar(m_selectedAssetConfig);
+            if (m_itemToConfigure == null)
+            {
+                EditorGUILayout.HelpBox(
+                    $"Could not find the {m_selectedAssetConfig.AssetItemName} item on the selected avatar. Is the {m_selectedAssetConfig.AssetName} installed?",
+                    MessageType.Error);
+                GUILayout.FlexibleSpace();
+                return;
+            }
+            m_itemToConfigure.gameObject.SetActive(true);
+
+            // Encapsulate into a ScrollView
+            m_configurationOptionsScroll = EditorGUILayout.BeginScrollView(m_configurationOptionsScroll);
+
+            // TODO: Draw the material selection (?)
+
+            // Draw the move / rotate options
+            DrawAssetItemRepositioningOptions(
+                GetItemsToReposition(m_selectedAssetConfig.MovableItems, m_selectedAssetConfig.AssetItemName), 
+                "Reposition items", 
+                "It is very important to only change the POSITION and ROTATION of the items selected!", 
+                Tool.Move, Tool.Rotate);
+
+            GUILayout.Space(16);
+
+            // Draw the scaling options
+            DrawAssetItemRepositioningOptions(
+                GetItemsToReposition(m_selectedAssetConfig.ScalableItems, m_selectedAssetConfig.AssetItemName),
+                "Scale items",
+                "It is very important to only change the SCALE of the items selected!",
+                Tool.Scale);
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        /// <summary>
+        /// Gets the transforms for the asset items to reposition on the current avatar.
+        /// </summary>
+        /// <param name="itemNames">The names of the asset items to reposition.</param>
+        /// <param name="itemsParentName">The asset item name.</param>
+        /// <returns></returns>
+        private Transform[] GetItemsToReposition(string[] itemNames, string itemsParentName)
+        {
+            if (itemNames == null || itemNames.Length == 0)
+            {
+                return null;
+            }
+
+            return itemNames
+                .Select(itemName => GetAvatarItemByPath(itemName, itemsParentName))
+                .Where(t => t != null)
+                .ToArray();
         }
 
         /// <summary>
@@ -1666,7 +1867,80 @@ namespace Okaeri.Editor
             }
 
             // Return the armature item
-            return m_animator.GetBoneTransform(bone).Find(itemName);
+            return m_avatarAnimator.GetBoneTransform(bone).Find(itemName);
+        }
+
+        /// <summary>
+        /// Draws the layout for the asset items repositioning options.
+        /// </summary>
+        /// <param name="itemsToReposition">The Transforms of the avatar asset items to reposition.</param>
+        /// <param name="title">The title text.</param>
+        /// <param name="warningMessage">The warning message.</param>
+        /// <param name="tools">The Editor tools to use for repositioning.</param>
+        private void DrawAssetItemRepositioningOptions(Transform[] itemsToReposition, string title, string warningMessage, params Tool[] tools)
+        {
+            // Check if we have items to reposition
+            if (itemsToReposition == null)
+            {
+                return;
+            }
+
+            // Begin foldout
+
+            // Draw title
+            var titleStyle = new GUIStyle(EditorStyles.largeLabel)
+            {
+                fontStyle = FontStyle.Bold
+            };
+            EditorGUILayout.LabelField($"{title.ToUpper()}:", titleStyle);
+            GUILayout.Space(8);
+
+            // Draw warning message
+            if (!string.IsNullOrWhiteSpace(warningMessage))
+            {
+                EditorGUILayout.HelpBox(warningMessage, MessageType.Warning);
+                GUILayout.Space(8);
+            }
+
+            // Draw repositioning tools for the items
+            foreach (var item in itemsToReposition)
+            {
+                DrawRepositioningTools(item, tools);
+            }
+        }
+
+        /// <summary>
+        /// Draws the layout for the asset item to reposition.
+        /// </summary>
+        /// <param name="item">The item to manipulate.</param>
+        /// <param name="tools">Determines the item manipulation options.</param>
+        /// <param name="labelStyle">The label style.</param>
+        private void DrawRepositioningTools(Transform item, params Tool[] tools)
+        {
+            // Check the item
+            if (item == null)
+            {
+                return;
+            }
+
+            // Draw the item name
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(item.name);
+            GUILayout.FlexibleSpace();
+
+            // Draw the repositioning tools
+            foreach (var tool in tools)
+            {
+                if (GUILayout.Button(tool.ToString(), GUILayout.Width(100)))
+                {
+                    Selection.activeGameObject = item.gameObject;
+                    EditorGUIUtility.PingObject(item.gameObject);
+                    Tools.current = tool;
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(8);
         }
 
         #endregion
@@ -1744,7 +2018,11 @@ namespace Okaeri.Editor
                 m_avatar.expressionParameters.parameters =
                     m_avatar.expressionParameters.parameters.Where(p => cleanAvatarExpressionParametersNames.Contains(p.name)).ToArray();
             }
+
+            // Remove the expression menu
+            m_installLog.Add($"i|\tRemoving expressions menu");
         }
+
         #endregion
 
     }
