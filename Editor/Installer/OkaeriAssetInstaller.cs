@@ -16,7 +16,7 @@ using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRLabs.AV3Manager;
 
-namespace Okaeri.Editor
+namespace Okaeri.Editor.Installer
 {
     public class OkaeriAssetConfigValidator
     {
@@ -1153,22 +1153,20 @@ namespace Okaeri.Editor
                 return false;
             }
 
-            // Get the asset expressions menu
-            var assetExpressionsMenuPath =
-                m_selectedAssetConfig.AssetPath + "/" + m_selectedAssetConfig.AssetExpressionsMenu;
-            var assetExpressionsMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(assetExpressionsMenuPath);
-
             // Search for the asset expressions menu
-            return FindExpressionsMenuOnAvatar(assetExpressionsMenu, m_avatar.expressionsMenu) != null;
+            var assetExpressionsMenu =
+                AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(Path.Combine(assetConfig.AssetPath,
+                    assetConfig.AssetExpressionsMenu));
+            return GetAssetExpressionsMenuOnAvatar(assetExpressionsMenu, m_avatar.expressionsMenu) != null;
         }
 
         /// <summary>
         /// Searchers for the asset VRCExpressionsMenu on the currently selected avatar.
         /// </summary>
-        /// <param name="assetMenu">The asset menu to search for..</param>
+        /// <param name="assetMenu">The asset menu to search for.</param>
         /// <param name="avatarMenu">The avatar menu to search in.</param>
         /// <returns></returns>
-        private VRCExpressionsMenu FindExpressionsMenuOnAvatar(VRCExpressionsMenu assetMenu, VRCExpressionsMenu avatarMenu)
+        private VRCExpressionsMenu GetAssetExpressionsMenuOnAvatar(VRCExpressionsMenu assetMenu, VRCExpressionsMenu avatarMenu)
         {
             // Check the arguments
             if (assetMenu == null || avatarMenu == null)
@@ -1187,7 +1185,7 @@ namespace Okaeri.Editor
                 }
 
                 // Check if the asset menu is in any submenus
-                var menuInSubMenu = FindExpressionsMenuOnAvatar(assetMenu, subMenu.subMenu);
+                var menuInSubMenu = GetAssetExpressionsMenuOnAvatar(assetMenu, subMenu.subMenu);
                 if (menuInSubMenu != null)
                 {
                     return menuInSubMenu;
@@ -1202,12 +1200,13 @@ namespace Okaeri.Editor
         /// Determines if the given VRCExpressionsMenu control is from the specified asset.
         /// </summary>
         /// <param name="control">The VRCExpressionMenu control to check.</param>
-        /// <param name="assetMenu">The asset expressions menu.</param>
+        /// <param name="assetMenu">The asset expressions menu name.</param>
         /// <returns>True if the VRCExpressionsMenu control is from the asset.</returns>
         private bool IsAssetSubmenu(VRCExpressionsMenu.Control control, VRCExpressionsMenu assetMenu)
         {
             return control != null &&
-                   control.type.Equals(VRCExpressionsMenu.Control.ControlType.SubMenu) &&
+                   assetMenu != null &&
+                   control.type == VRCExpressionsMenu.Control.ControlType.SubMenu &&
                    control.subMenu != null &&
                    control.subMenu.name.Equals(assetMenu.name);
         }
@@ -2019,6 +2018,59 @@ namespace Okaeri.Editor
 
             // Remove the expression menu
             m_installLog.Add($"i|\tRemoving expressions menu");
+            var assetExpressionsMenu =
+                AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(Path.Combine(assetConfig.AssetPath,
+                    assetConfig.AssetExpressionsMenu));
+            var assetExpressionsMenuOnAvatar =
+                GetAssetExpressionsMenuOnAvatar(assetExpressionsMenu, m_avatar.expressionsMenu);
+            if (assetExpressionsMenuOnAvatar != null)
+            { 
+                RemoveAssetExpressionsMenuFromAvatar(assetExpressionsMenuOnAvatar, m_avatar.expressionsMenu);
+            }
+
+            // Save modified assets
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// Removes the specified control from the expressions menu.
+        /// </summary>
+        /// <param name="assetMenu">The asset expressions menu to remove.</param>
+        /// <param name="avatarMenu">The avatar expressions menu.</param>
+        private void RemoveAssetExpressionsMenuFromAvatar(VRCExpressionsMenu assetMenu, VRCExpressionsMenu avatarMenu)
+        {
+            string errorMessage;
+            if (assetMenu == null)
+            {
+                errorMessage = "Asset expressions menu is null.";
+                m_installLog.Add($"e|\t{errorMessage}");
+                throw new ArgumentNullException(errorMessage);
+            }
+
+            if (avatarMenu == null)
+            {
+                errorMessage = "Avatar expressions menu is null.";
+                m_installLog.Add($"e|\t{errorMessage}");
+                throw new ArgumentNullException(errorMessage);
+            }
+
+            for (var i = 0; i < avatarMenu.controls?.Count; i++)
+            {
+                var menuControl = avatarMenu.controls[i];
+                if (menuControl?.type != VRCExpressionsMenu.Control.ControlType.SubMenu)
+                {
+                    continue;
+                }
+
+                if (menuControl.subMenu.name.Equals(assetMenu.name))
+                {
+                    avatarMenu.controls.RemoveAt(i);
+                    break;
+                }
+
+                RemoveAssetExpressionsMenuFromAvatar(assetMenu, menuControl.subMenu);
+            }
         }
 
         #endregion
