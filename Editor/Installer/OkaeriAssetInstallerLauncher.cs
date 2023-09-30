@@ -5,9 +5,293 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEditor;
+using System.Linq;
+using System.Net.NetworkInformation;
+using Newtonsoft.Json;
 
 namespace Okaeri.Editor
 {
+    /// <summary>
+    /// Helper class for downloading Okaeri Asset Installer components.
+    /// </summary>
+    public class OkaeriAssetInstallerDownloader
+    {
+        private class OkaeriAssetInstallerRepositoryItem
+        {
+            public string Type { get; set; }
+            public string URL { get; set; }
+            public string Path { get; set; }
+        }
+
+        private class OkaeriAssetInstallerRepositoryBlob
+        {
+            public string Content { get; set; }
+        }
+
+        private class OkaeriAssetInstallerRepository
+        {
+            [JsonProperty("tree")]
+            public OkaeriAssetInstallerRepositoryItem[] Items { get; set; }
+        }
+
+        /// <summary>
+        /// The HTTPClient instance to use for requests.
+        /// </summary>
+        private static readonly HttpClient m_httpClient = new HttpClient();
+
+        /// <summary>
+        /// The name of the Okaeri Asset Installer update repository branch.
+        /// </summary>
+        private const string INSTALLER_UPDATE_REPOSITORY_BRANCH = "feat/config-materials";
+
+        /// <summary>
+        /// The Okaeri Asset Installer main update repository.
+        /// </summary>
+        private static readonly string INSTALLER_UPDATE_REPOSITORY = $"https://api.github.com/repos/OkaeriGameStudio/OkaeriAssetInstaller/git/trees/{INSTALLER_UPDATE_REPOSITORY_BRANCH}";
+
+        /// <summary>
+        /// The Okaeri Asset Installer update repository path.
+        /// </summary>
+        private static readonly string INSTALLER_REPOSITORY_PATH = "Editor/Installer";
+
+        /// <summary>
+        /// The Okaeri Asset Installer repository files.
+        /// </summary>
+        private static OkaeriAssetInstallerRepository m_installerRepository;
+
+        /// <summary>
+        /// Gets or sets the local Okaeri Asset Installer path.
+        /// </summary>
+        public static string LOCAL_INSTALLER_PATH { get; set; }
+
+        /// <summary>
+        /// Determines if download operations can be performed.
+        /// </summary>
+        /// <returns>True if download operations can be performed.</returns>
+        public static async Task<bool> CanDownload()
+        {
+            // Check if the current session has network connectivity
+            if (!NetworkInterface.GetIsNetworkAvailable())
+            {
+                Debug.LogWarning("No network connection present.");
+                return false;
+            }
+
+            // Check if we have access to the internet
+            var pingRequest = new System.Net.NetworkInformation.Ping();
+            var pingResponse = await pingRequest.SendPingAsync("1.1.1.1", 10000);
+            if (pingResponse.Status != IPStatus.Success)
+            {
+                Debug.LogWarning("Cannot acces Internet.");
+                return false;
+            }
+
+            // We can download
+            return true;
+        }
+
+        /// <summary>
+        /// Returns the Okaeri Asset Installer repository items from the update repository.
+        /// </summary>
+        /// <param name="address">The update repository address path.</param>
+        /// <returns>An OkaeriAssetInstallerRepository object.</returns>
+        private static async Task<OkaeriAssetInstallerRepository> GetRepositoryItems(string address)
+        {
+            // Check if we can reach the repository
+            if (!await CanDownload())
+            {
+                Debug.LogError("Cannot reach the Okaeri Asset Installer repository. Check your Internet connection and try again.");
+                return null;
+            }
+
+            // Update the client
+            if (m_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
+            {
+                m_httpClient.DefaultRequestHeaders.UserAgent.Add(new System.Net.Http.Headers.ProductInfoHeaderValue("OkaeriAssetInstaller", "1"));
+            }
+
+            // Get the editor URL
+            var request = await m_httpClient.GetAsync(address + "?recursive=1");
+            if (!request.IsSuccessStatusCode)
+            {
+                Debug.LogError($"Cannot read the Okaeri Asset Installer repository: {request.ReasonPhrase}");
+                return null;
+            }
+
+            // Check the response
+            var response = await request.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                Debug.LogError($"Invalid response received for the Okaeri Asset Installer repository.");
+                return null;
+            }
+
+            // Return the result
+            return JsonConvert.DeserializeObject<OkaeriAssetInstallerRepository>(response);
+        }
+
+        /// <summary>
+        /// Returns the latest Okaeri Asset Installer repository.
+        /// </summary>
+        /// <returns>The latest Okaeri Asset Installer repository.</returns>
+        private static async Task<OkaeriAssetInstallerRepository> GetInstallerRepository()
+        {
+            // Check if we already cached the repository
+            if (m_installerRepository != null && m_installerRepository.Items.Length > 0)
+            {
+                return m_installerRepository;
+            }
+
+            // Get the base update repository
+            m_installerRepository = await GetRepositoryItems(INSTALLER_UPDATE_REPOSITORY);
+            if (m_installerRepository == null || m_installerRepository.Items.Length == 0)
+            {
+                Debug.LogError("Could not fetch the Okaeri Asset Installer update repository files.");
+                return null;
+            }
+
+            // Return the result
+            return m_installerRepository;
+        }
+
+        /// <summary>
+        /// Returns the contents of a specified Okaeri Asset Installer update repository file.
+        /// </summary>
+        /// <param name="repositoryUrl">The repository file Uri.</param>
+        /// <returns>The file bytes.</returns>
+        private static async Task<byte[]> GetRepositoryFileBytes(string repositoryUrl)
+        {
+            // Check the given url.
+            if (string.IsNullOrWhiteSpace(repositoryUrl))
+            {
+                return null;
+            }
+
+            // Get the contents
+            var request = await m_httpClient.GetAsync(repositoryUrl);
+            if (!request.IsSuccessStatusCode)
+            {
+                Debug.LogError($"Cannot read the Okaeri Asset Installer repository file: {request.ReasonPhrase}");
+                return null;
+            }
+
+            // Read the contents
+            var response = await request.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                Debug.LogError($"Invalid response received for the Okaeri Asset Installer repository.");
+                return null;
+            }
+
+            // Convert the contents
+            var blob = JsonConvert.DeserializeObject<OkaeriAssetInstallerRepositoryBlob>(response);
+            if (string.IsNullOrWhiteSpace(blob.Content))
+            {
+                return null;
+            }
+
+            // Return the result
+            return Convert.FromBase64String(blob.Content);
+        }
+
+        /// <summary>
+        /// Retrieves the latest Okaeri Asset Installer files at the specified repository path.
+        /// </summary>
+        /// <param name="repositoryPath">The repository files path.</param>
+        /// <returns>True if the Okaeri Asset Installer files at the specified repository path have been updated.</returns>
+        private static async Task<bool> GetLatestRepositoryFiles(string repositoryPath)
+        {
+            // Check the installer path
+            if (string.IsNullOrWhiteSpace(LOCAL_INSTALLER_PATH))
+            {
+                Debug.LogError("Could not get the latest installer file: The local installer path is empty or invalid.");
+                return false;
+            }
+
+            // Check the repository path
+            if (string.IsNullOrWhiteSpace(repositoryPath))
+            {
+                Debug.LogError("Could not get the latest installer file: The provided repository path is empty or invalid.");
+                return false;
+            }
+
+            // Get the latest repository files
+            var installerRepository = await GetInstallerRepository();
+            var repositoryFilesPath = INSTALLER_REPOSITORY_PATH + $"/{repositoryPath}";
+            var repositoryFiles = installerRepository.Items.Where(i => i.Type.Equals("blob") && i.Path.StartsWith(repositoryFilesPath));
+            if (!repositoryFiles.Any())
+            {
+                Debug.LogWarning($"Could not get the latest Okaeri Asset Installer repository files at: {repositoryFilesPath}.");
+                return false;
+            }
+
+            // Retrieve the latest files
+            try
+            {
+                var localPath = LOCAL_INSTALLER_PATH.Replace(INSTALLER_REPOSITORY_PATH.Replace("/", "\\"), "");
+                foreach (var repositoryFile in repositoryFiles)
+                {
+                    // Get the local installer path
+                    var currentPath = Path.Combine(localPath, repositoryFile.Path).Replace("/", "\\");
+
+                    // Update the file
+                    var bytes = await GetRepositoryFileBytes(repositoryFile.URL);
+                    File.WriteAllBytes(currentPath, bytes);
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e.Message);
+                return false;
+            }
+        }
+
+        #region Resources
+
+        /// <summary>
+        /// The relative Okaeri Asset Installer update repository path to the resources.
+        /// </summary>
+        private const string RESOURCES_PATH = "Resources";
+
+        /// <summary>
+        /// Gets the latest Okaeri Asset Installer resources.
+        /// </summary>
+        /// <returns>True if the Okaeri Asset Installer resources have been updated.</returns>
+        public static async Task<bool> GetLatestResources()
+        {
+            return await GetLatestRepositoryFiles(RESOURCES_PATH);
+        }
+
+        #endregion
+
+        #region Asset Configurations
+
+        /// <summary>
+        /// The Okaeri asset configuration schema file name.
+        /// </summary>
+        private const string ASSET_CONFIG_FILE_NAME = "OkaeriAssetConfig.cs";
+
+        /// <summary>
+        /// The Okaeri asset configurations path.
+        /// </summary>
+        private const string ASSET_CONFIGS_PATH = "Configs";
+
+        /// <summary>
+        /// Gets the latest Okaeri asset configurations.
+        /// </summary>
+        /// <returns>True if the Okaeri asset configurations have been updated.</returns>
+        public static async Task<bool> GetLatestAssetConfigurations()
+        {
+            var assetConfig = await GetLatestRepositoryFiles(ASSET_CONFIG_FILE_NAME);
+            var assetConfigs = await GetLatestRepositoryFiles(ASSET_CONFIGS_PATH);
+            return assetConfig && assetConfigs;
+        }
+
+        #endregion
+    }
+
     /// <summary>
     /// Class responsible for updating and launching the Okaeri Asset Installer window.
     /// </summary>
@@ -96,7 +380,6 @@ namespace Okaeri.Editor
             GetInstallerScriptPath();
             if (CheckForDependencies())
             {
-                //ShowInstaller();
                 CheckForUpdates();
                 return;
             }
@@ -199,9 +482,9 @@ namespace Okaeri.Editor
         /// </summary>
         private async void CheckForUpdates()
         {
-            
             m_launcherStatus = "Checking for updates";
             string versionLine, versionString;
+            bool offlineMode = false;
 
             // Check if the window is currently installed
             var installerScript = AssetDatabase.LoadAssetAtPath<TextAsset>(m_installerScriptPath);
@@ -234,7 +517,7 @@ namespace Okaeri.Editor
                 // Check if we need to update
                 if (m_installerVersion >= m_latestInstallerVersion)
                 {
-                    ShowInstaller();
+                    ShowInstaller(true);
                     return;
                 }
 
@@ -252,11 +535,12 @@ namespace Okaeri.Editor
             {
                 // Logs if the server is dead or no internet
                 m_launcherStatus = "Couldn't connect to the server!";
+                offlineMode = true;
                 Debug.Log("<color=pink>[Okaeri]" + "Couldn't connect to the server! Proceeding without installer updates... Version: " + m_installerVersion);
             }
 
             // Show the installer
-            ShowInstaller();
+            ShowInstaller(offlineMode);
         }
 
         /// <summary>
@@ -275,7 +559,8 @@ namespace Okaeri.Editor
         /// <summary>
         /// Shows the Okaeri Asset Installer window.
         /// </summary>
-        private void ShowInstaller()
+        /// <param name="offlineMode">Determines if the Okaeri Asset Installer can update.</param>
+        private void ShowInstaller(bool offlineMode)
         {
             // Prepare the window position
             var windowX = (Screen.currentResolution.width - WINDOW_WIDTH) / 2;
@@ -285,7 +570,8 @@ namespace Okaeri.Editor
             m_installerWindow = CreateInstance("OkaeriAssetInstaller") as EditorWindow;
             if (m_installerWindow != null)
             {
-                m_installerWindow.titleContent = new GUIContent(WINDOW_TITLE);
+                var title = offlineMode ? $"{WINDOW_TITLE} [OFFLINE]" : WINDOW_TITLE;
+                m_installerWindow.titleContent = new GUIContent(title);
                 m_installerWindow.position = new Rect(windowX, windowY, WINDOW_WIDTH, WINDOW_HEIGHT);
                 m_installerWindow.Show();
             }

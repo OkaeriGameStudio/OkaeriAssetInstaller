@@ -1,4 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
 using UnityEngine;
 
 namespace Okaeri.Editor.Installer
@@ -65,6 +69,13 @@ namespace Okaeri.Editor.Installer
                 {
                     // Check the field type
                     if (assetConfigField.FieldType != typeof(string))
+                    {
+                        continue;
+                    }
+
+                    // Check if it's a required field
+                    var isRequiredAttribute = assetConfigField.GetCustomAttribute<OkaeriAssetRequiredAttribute>(true);
+                    if (isRequiredAttribute == null)
                     {
                         continue;
                     }

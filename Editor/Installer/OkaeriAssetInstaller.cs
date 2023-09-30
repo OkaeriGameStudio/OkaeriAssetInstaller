@@ -28,6 +28,11 @@ namespace Okaeri.Editor.Installer
     public class OkaeriAssetInstaller : EditorWindow
     {
         /// <summary>
+        /// Determines if the Okaeri asset installer can update.
+        /// </summary>
+        public static bool OFFLINE;
+
+        /// <summary>
         /// Unity project relative path to the Okaeri asset installer path.
         /// </summary>
         private static string INSTALLER_PATH;
@@ -280,6 +285,17 @@ namespace Okaeri.Editor.Installer
         /// </summary>
         private async void UpdateAssetConfigurations()
         {
+            // Check if we are in offline mode
+            if (OFFLINE)
+            {
+                // Load the configurations
+                LoadAssetConfigurations();
+
+                // Set the flag
+                m_configUpdateError = null;
+                return;
+            }
+
             // Try to update the configs
             try
             {
@@ -340,6 +356,11 @@ namespace Okaeri.Editor.Installer
         #region Installer Window
 
         /// <summary>
+        /// Determines if the Okaeri asset installer resources have been updated.
+        /// </summary>
+        private bool m_updated;
+
+        /// <summary>
         /// The installer view to display.
         /// </summary>
         private OkaeriAssetInstallerView m_installerView = OkaeriAssetInstallerView.Install;
@@ -392,9 +413,6 @@ namespace Okaeri.Editor.Installer
             // Get current path
             var scriptPath = AssetDatabase.GetAssetPath(MonoScript.FromScriptableObject(this));
             INSTALLER_PATH = Path.GetDirectoryName(scriptPath);
-
-            // Updates on the configurations
-            UpdateAssetConfigurations();
         }
 
         /// <summary>
@@ -404,6 +422,19 @@ namespace Okaeri.Editor.Installer
         {
             // Header
             DrawBanner();
+
+            // Check if we updated resources
+            if (!m_updated)
+            {
+                // Get the offline mode
+                OFFLINE = titleContent.text.ToLower().Contains("offline");
+
+                // Updates on the configurations
+                UpdateAssetConfigurations();
+
+                // Set the flag
+                m_updated = true;
+            }
 
             // Asset configuration loading errors
             if (!string.IsNullOrWhiteSpace(m_configUpdateError))
@@ -768,7 +799,7 @@ namespace Okaeri.Editor.Installer
         /// <typeparam name="T">The type of blank or empty asset to create.</typeparam>
         /// <param name="assetPath">The name of the blank asset to create.</param>
         /// <returns>The created blank or empty asset of the specified type.</returns>
-        private T CreateBlankAsset<T>(string assetPath) where T: UnityEngine.Object
+        private T CreateBlankAsset<T>(string assetPath) where T : UnityEngine.Object
         {
             // Initialize the asset name
             var blankAssetName = string.Empty;
@@ -792,7 +823,7 @@ namespace Okaeri.Editor.Installer
             {
                 throw new InvalidDataException("Could not find a blank asset for the specified asset type.");
             }
-            
+
             // Create the blank or empty asset
             var blankAssetPath = Path.Combine(INSTALLER_RESOURCES_PATH, blankAssetName);
             AssetDatabase.CopyAsset(blankAssetPath, assetPath);
@@ -826,7 +857,7 @@ namespace Okaeri.Editor.Installer
             {
                 errors.Add("Avatar FX animator already contains some parameters from the asset.");
             }
-            
+
             // Search for expression parameters
             var assetExpressionParametersOnAvatar = GetAssetExpressionParametersOnAvatar(assetConfig);
             if (assetExpressionParametersOnAvatar?.Length > 0)
@@ -1001,7 +1032,7 @@ namespace Okaeri.Editor.Installer
         {
             // Get the avatar expression parameters
             if (m_avatar.expressionParameters == null ||
-                m_avatar.expressionParameters.parameters == null || 
+                m_avatar.expressionParameters.parameters == null ||
                 m_avatar.expressionParameters.parameters.Length == 0)
             {
                 // No avatar parameters
@@ -1381,9 +1412,9 @@ namespace Okaeri.Editor.Installer
                 {
                     continue;
                 }
-                
+
                 // Install the armature asset on the bone
-                m_installLog.Add($"i|\tInstalling asset into the armature {bone}"); 
+                m_installLog.Add($"i|\tInstalling asset into the armature {bone}");
                 AssignAssetToBone(assetItem, bone);
             }
         }
@@ -1727,9 +1758,9 @@ namespace Okaeri.Editor.Installer
 
             // Draw the move / rotate options
             DrawAssetItemRepositioningOptions(
-                GetItemsToReposition(m_selectedAssetConfig.MovableItems, m_selectedAssetConfig.AssetItemName), 
-                "Reposition items", 
-                "It is very important to only change the POSITION and ROTATION of the items selected!", 
+                GetItemsToReposition(m_selectedAssetConfig.MovableItems, m_selectedAssetConfig.AssetItemName),
+                "Reposition items",
+                "It is very important to only change the POSITION and ROTATION of the items selected!",
                 Tool.Move, Tool.Rotate);
 
             GUILayout.Space(16);
@@ -1740,6 +1771,11 @@ namespace Okaeri.Editor.Installer
                 "Scale items",
                 "It is very important to only change the SCALE of the items selected!",
                 Tool.Scale);
+
+            GUILayout.Space(16);
+
+            // Draw the material selection options
+            DrawMaterialSelectionOptions(m_selectedAssetConfig.AssetMaterialsFolder);
 
             EditorGUILayout.EndScrollView();
         }
@@ -1870,6 +1906,29 @@ namespace Okaeri.Editor.Installer
             GUILayout.Space(8);
         }
 
+        /// <summary>
+        /// Draws the layout for the asset material selection.
+        /// </summary>
+        /// <param name="materialsFolder">The path to the asset's materials folder.</param>
+        private void DrawMaterialSelectionOptions(string materialsFolder)
+        {
+            // Check if the folder if valid
+            if (string.IsNullOrEmpty(materialsFolder))
+            {
+                return;
+            }
+
+            // Draw title
+            var titleStyle = new GUIStyle(EditorStyles.largeLabel)
+            {
+                fontStyle = FontStyle.Bold
+            };
+            EditorGUILayout.LabelField($"SELECT MATERIAL:", titleStyle);
+            GUILayout.Space(8);
+
+
+        }
+
         #endregion
 
         #region Uninstaller Logic
@@ -1940,8 +1999,8 @@ namespace Okaeri.Editor.Installer
             {
                 var avatarExpressionParametersNames = m_avatar.expressionParameters.parameters.Select(p => p.name);
                 var cleanAvatarExpressionParametersNames =
-                    avatarExpressionParametersNames.Except(assetExpressionParametersOnAvatar); 
-                
+                    avatarExpressionParametersNames.Except(assetExpressionParametersOnAvatar);
+
                 m_avatar.expressionParameters.parameters =
                     m_avatar.expressionParameters.parameters.Where(p => cleanAvatarExpressionParametersNames.Contains(p.name)).ToArray();
                 EditorUtility.SetDirty(m_avatar.expressionParameters);
@@ -1955,7 +2014,7 @@ namespace Okaeri.Editor.Installer
             var assetExpressionsMenuOnAvatar =
                 GetAssetExpressionsMenuOnAvatar(assetExpressionsMenu, m_avatar.expressionsMenu);
             if (assetExpressionsMenuOnAvatar != null)
-            { 
+            {
                 RemoveAssetExpressionsMenuFromAvatar(assetExpressionsMenuOnAvatar, m_avatar.expressionsMenu);
                 EditorUtility.SetDirty(m_avatar.expressionsMenu);
             }
