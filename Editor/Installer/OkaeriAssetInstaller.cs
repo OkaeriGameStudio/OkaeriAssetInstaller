@@ -284,7 +284,8 @@ namespace Okaeri.Editor
                 if (!string.IsNullOrWhiteSpace(latestConfigs.error))
                 {
                     // Log error message
-                    UnityEngine.Debug.Log("<color=pink>[Okaeri]" + $"Asset configurations update warning: {latestConfigs.error}");
+                    var errorMessage = latestConfigs.error.Split('|')[1];
+                    UnityEngine.Debug.LogWarning("[Okaeri] " + errorMessage);
 
                     // Load configurations
                     LoadAssetConfigurations();
