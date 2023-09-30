@@ -7,8 +7,14 @@ using UnityEngine;
 
 namespace Okaeri.Editor.Installer
 {
+    /// <summary>
+    /// Helper attribute to determine required asset configuration fields.
+    /// </summary>
     public class OkaeriAssetRequiredAttribute : Attribute { }
 
+    /// <summary>
+    /// Main Okaeri asset installer configuration schema.
+    /// </summary>
     [CreateAssetMenu(fileName = "AssetConfig", menuName = "Okaeri/Installer/Asset Configuration")]
     public class OkaeriAssetConfig : ScriptableObject
     {
@@ -47,7 +53,10 @@ namespace Okaeri.Editor.Installer
         public string error;
     }
 
-    public class OkaeriAssetConfigValidator
+    /// <summary>
+    /// Helper class for validating Okaeri asset installer configs.
+    /// </summary>
+    public static class OkaeriAssetConfigValidator
     {
         /// <summary>
         /// Determines if the provided Okaeri asset configuration is valid.

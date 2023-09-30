@@ -157,11 +157,6 @@ namespace Okaeri.Editor.Installer
         #region Asset Configurations
 
         /// <summary>
-        /// The asset configuration update error.
-        /// </summary>
-        private string m_configUpdateError = "!";
-
-        /// <summary>
         /// A dictionary of available asset configurations, where the key is their path.
         /// </summary>
         private Dictionary<string, OkaeriAssetConfig> m_localConfigs;
@@ -290,9 +285,6 @@ namespace Okaeri.Editor.Installer
             {
                 // Load the configurations
                 LoadAssetConfigurations();
-
-                // Set the flag
-                m_configUpdateError = null;
                 return;
             }
 
@@ -310,7 +302,11 @@ namespace Okaeri.Editor.Installer
                 var latestConfigs = await GetLatestAssetConfigurations();
                 if (!string.IsNullOrWhiteSpace(latestConfigs.error))
                 {
-                    m_configUpdateError = latestConfigs.error;
+                    // Logs message to console
+                    UnityEngine.Debug.Log("<color=pink>[Okaeri] " + $"Couldn't get latest asset configurations: {latestConfigs.error}");
+
+                    // Load the asset configurations
+                    LoadAssetConfigurations();
                     return;
                 }
 
@@ -343,12 +339,11 @@ namespace Okaeri.Editor.Installer
                 // Logs if the server is dead or no internet
                 UnityEngine.Debug.Log("<color=pink>[Okaeri]" + "Couldn't connect to the server! Proceeding without configs updates...");
             }
-
-            // Load the configurations
-            LoadAssetConfigurations();
-
-            // Set the flag
-            m_configUpdateError = null;
+            finally
+            {
+                // Load the configurations
+                LoadAssetConfigurations();
+            }
         }
 
         #endregion
@@ -436,15 +431,6 @@ namespace Okaeri.Editor.Installer
                 m_updated = true;
             }
 
-            // Asset configuration loading errors
-            if (!string.IsNullOrWhiteSpace(m_configUpdateError))
-            {
-                DrawAssetConfigurationLoadingErrors();
-                GUILayout.FlexibleSpace();
-                DrawFooter();
-                return;
-            }
-
             // Avatar selection
             GUI.enabled = m_installerView != OkaeriAssetInstallerView.Configure;
             if (!DrawAvatarSelectionField())
@@ -488,25 +474,6 @@ namespace Okaeri.Editor.Installer
 
             // Footer
             DrawFooter();
-        }
-
-        /// <summary>
-        /// Draws an error / warning box if the asset configurations weren't properly initialized.
-        /// </summary>
-        private void DrawAssetConfigurationLoadingErrors()
-        {
-            // Check for initialization
-            if (m_configUpdateError.Equals("!"))
-            {
-                return;
-            }
-
-            // Get the type of message
-            var errorMessageParts = m_configUpdateError.Split('|');
-            Enum.TryParse(errorMessageParts[0], true, out MessageType messageType);
-
-            // Show the appropriate message
-            EditorGUILayout.HelpBox(errorMessageParts[1], messageType, true);
         }
 
         /// <summary>
