@@ -1,4 +1,4 @@
-//VERSION1.0.6
+//VERSION1.0.7
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using UnityEngine.Animations;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRLabs.AV3Manager;
@@ -638,7 +639,6 @@ namespace Okaeri.Editor
             {
                 m_moveRotateScale = true;
                 DrawAssetMoveRotateScale();
-                //return;
             }
 
             // Draw the uninstall button
@@ -1137,7 +1137,6 @@ namespace Okaeri.Editor
                     throw new InvalidDataException(errorMessage);
                 }
 
-
                 // Assign the items to correct places
                 if (m_installItems)
                 {
@@ -1523,6 +1522,16 @@ namespace Okaeri.Editor
         private Transform[] m_itemsToMoveRotate;
 
         /// <summary>
+        /// A dictionary representing the ParentConstraint sources to use for previewing when moving the item transforms.
+        /// </summary>
+        private Dictionary<string, ParentConstraint> m_itemsToMoveRotateConstraints;
+
+        /// <summary>
+        /// A dictionary containing the initial asset item ParentConstraint weights.
+        /// </summary>
+        private Dictionary<ParentConstraint, float[]> m_parentConstraintsBackup;
+
+        /// <summary>
         /// The list of item transforms on the avatar that can be scaled.
         /// </summary>
         private Transform[] m_itemsToScale;
@@ -1554,6 +1563,18 @@ namespace Okaeri.Editor
                 m_assetItem?.gameObject.SetActive(false);
                 m_moveRotateScale = false;
 
+                foreach (var parentConstraintBackup in m_parentConstraintsBackup)
+                {
+                    var parentConstraint = parentConstraintBackup.Key;
+                    var parentConstraintWeights = parentConstraintBackup.Value;
+                    for (var i = 0; i < parentConstraint.sourceCount; i++)
+                    {
+                        var source = parentConstraint.GetSource(i);
+                        source.weight = parentConstraintWeights[i];
+                        parentConstraint.SetSource(i, source);
+                    }
+                }
+
                 return;
             }
 
@@ -1567,9 +1588,7 @@ namespace Okaeri.Editor
                 padding = new RectOffset(5, 0, 0, 0)
             };
 
-            // Get the items
-            //if (m_assetItem == null)
-            //{
+            // Get the asset items
             m_assetItem = GetAssetItemOnAvatar(m_selectedAssetConfig);
             if (m_assetItem == null)
             {
@@ -1579,19 +1598,29 @@ namespace Okaeri.Editor
                 GUILayout.FlexibleSpace();
                 return;
             }
-            //}
             m_assetItem.gameObject.SetActive(true);
 
             var itemsParent = m_selectedAssetConfig.AssetItemName;
             if (m_itemsToMoveRotate == null)
             {
+                // Get the items to move / rotate on the avatar
                 m_itemsToMoveRotate = m_selectedAssetConfig.MovableItems
                     .Select(i => GetAvatarItemByPath(i, itemsParent))
                     .Where(i => i != null)
                     .ToArray();
+
+                // Get the ParentConstraints from the avatar item
+                var parentConstraints = m_assetItem.GetComponentsInChildren<ParentConstraint>();
+                m_parentConstraintsBackup = parentConstraints
+                    .Select(p => new Tuple<ParentConstraint, float[]>(p, GetParentConstraintWeights(p)))
+                    .ToDictionary(p => p.Item1, p => p.Item2);
+                m_itemsToMoveRotateConstraints = m_itemsToMoveRotate
+                    .Select(i => new Tuple<string, ParentConstraint>(i.name, GetItemParentConstraint(i.name, parentConstraints)))
+                    .ToDictionary(i => i.Item1, i => i.Item2);
             }
             if (m_itemsToScale == null)
             {
+                // Get the items to scale on the avatar
                 m_itemsToScale = m_selectedAssetConfig.ScalableItems
                     .Select(i => GetAvatarItemByPath(i, itemsParent))
                     .Where(i => i != null)
@@ -1621,6 +1650,61 @@ namespace Okaeri.Editor
         }
 
         /// <summary>
+        /// Get the ParentConstraint weights.
+        /// </summary>
+        /// <param name="parentConstraint">The ParentConstraint to get the weights for.</param>
+        /// <returns>A list of weights representing the value for each ParentConstraint source index.</returns>
+        private float[] GetParentConstraintWeights(ParentConstraint parentConstraint)
+        {
+            // Check the given ParentConstraint
+            if (parentConstraint == null || parentConstraint.sourceCount == 0)
+            {
+                return null;
+            }
+
+            // Get the weights
+            var result = new float[parentConstraint.sourceCount];
+            for (var i = 0; i < parentConstraint.sourceCount; i++)
+            {
+                result[i] = parentConstraint.GetSource(i).weight;
+            }
+
+            // Return the result
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the ParentConstraint for the specified asset item to move / rotate.
+        /// </summary>
+        /// <param name="itemName">The name of the asset item to move / rotate.</param>
+        /// <param name="parentConstraints">The list of ParentConstraints on the asset item.</param>
+        /// <returns>The ParentConstraint for the specified asset item to move / rotate.</returns>
+        private ParentConstraint GetItemParentConstraint(string itemName, ParentConstraint[] parentConstraints)
+        {
+            // Check the given arguments
+            if (string.IsNullOrWhiteSpace(itemName) || parentConstraints == null || parentConstraints.Length == 0)
+            {
+                return null;
+            }
+
+            // Find the constraint source
+            foreach (var parentConstraint in parentConstraints)
+            {
+                for (var i = 0; i < parentConstraint.sourceCount; i++)
+                {
+                    var source = parentConstraint.GetSource(i);
+                    if (source.sourceTransform != null && source.sourceTransform.name.Equals(itemName))
+                    {
+                        return parentConstraint;
+                    }
+                }
+            }
+
+            // Return nothing if not found
+            return null;
+        }
+
+        /// <summary>
         /// Draws the layout for the asset item to move / rotate / scale.
         /// </summary>
         /// <param name="item">The item to manipulate.</param>
@@ -1635,9 +1719,22 @@ namespace Okaeri.Editor
             {
                 if (GUILayout.Button(tool.ToString(), GUILayout.Width(100)))
                 {
+                    // Select the object
                     Selection.activeGameObject = item.gameObject;
                     EditorGUIUtility.PingObject(item.gameObject);
                     Tools.current = tool;
+
+                    // ParentConstraint preview
+                    if (m_itemsToMoveRotateConstraints.TryGetValue(item.name, out var parentConstraint) && parentConstraint != null)
+                    {
+                        // Go thorugh the parent constraint sources
+                        for (var i = 0; i < parentConstraint.sourceCount; i++)
+                        {
+                            var source = parentConstraint.GetSource(i);
+                            source.weight = source.sourceTransform.name.Equals(item.name) ? 1 : 0;
+                            parentConstraint.SetSource(i, source);
+                        }
+                    }
                 }
             }
 
