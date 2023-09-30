@@ -199,7 +199,7 @@ namespace Okaeri.Editor
         /// </summary>
         private async void CheckForUpdates()
         {
-            
+
             m_launcherStatus = "Checking for updates";
             string versionLine, versionString;
 
