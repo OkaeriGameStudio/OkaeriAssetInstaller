@@ -1,4 +1,4 @@
-//VERSION1.0.5
+//VERSION1.0.6
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1172,6 +1172,7 @@ namespace Okaeri.Editor
                 {
                     m_assetItem.gameObject.SetActive(false);
                 }
+
                 success = true;
             }
             finally
@@ -1188,8 +1189,11 @@ namespace Okaeri.Editor
                 {
                     File.Delete($"{INSTALLER_TEMP_FOLDER}.meta");
                     Directory.Delete(INSTALLER_TEMP_FOLDER, true);
-                    AssetDatabase.Refresh();
                 }
+
+                // Save everything
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
 
                 // Reset flag
                 m_installing = false;
@@ -1199,9 +1203,9 @@ namespace Okaeri.Editor
             {
                 m_installLog.Add($"s|{assetConfig.AssetName} installed successfully!");
                 m_moveRotateScale = EditorUtility.DisplayDialog(
-                    "Okaeri Asset Installer", 
-                    $"{assetConfig.AssetName} has been successfully installed on {m_avatar.name}!\n\n" + 
-                    "The next step will guide you into correctly positioning and scaling the asset items.", 
+                    "Okaeri Asset Installer",
+                    $"{assetConfig.AssetName} has been successfully installed on {m_avatar.name}!\n\n" +
+                    "The next step will guide you into correctly positioning and scaling the asset items.",
                     "Continue");
             }
         }
@@ -1247,9 +1251,9 @@ namespace Okaeri.Editor
                 {
                     continue;
                 }
-                
+
                 // Install the armature asset on the bone
-                m_installLog.Add($"i|\tInstalling asset into the armature {bone}"); 
+                m_installLog.Add($"i|\tInstalling asset into the armature {bone}");
                 AssignAssetToBone(assetItem, bone);
             }
         }
@@ -1481,6 +1485,9 @@ namespace Okaeri.Editor
 
             // Set the merged expression parameters
             m_avatar.expressionParameters.parameters = mergedParameters.ToArray();
+
+            // Mark as dirty to force save
+            EditorUtility.SetDirty(m_avatar.expressionParameters);
         }
 
         /// <summary>
@@ -1501,6 +1508,9 @@ namespace Okaeri.Editor
                 type = VRCExpressionsMenu.Control.ControlType.SubMenu,
                 subMenu = m_assetExpressionsMenu
             });
+
+            // Mark as dirty to force save
+            EditorUtility.SetDirty(m_avatarExpressionsMenu);
         }
 
         #endregion
@@ -1560,15 +1570,15 @@ namespace Okaeri.Editor
             // Get the items
             //if (m_assetItem == null)
             //{
-                m_assetItem = GetAssetItemOnAvatar(m_selectedAssetConfig);
-                if (m_assetItem == null)
-                {
-                    EditorGUILayout.HelpBox(
-                        $"Could not find the {m_selectedAssetConfig.AssetItemName} item on the selected avatar. Is the {m_selectedAssetConfig.AssetName} installed?",
-                        MessageType.Error);
-                    GUILayout.FlexibleSpace();
-                    return;
-                }
+            m_assetItem = GetAssetItemOnAvatar(m_selectedAssetConfig);
+            if (m_assetItem == null)
+            {
+                EditorGUILayout.HelpBox(
+                    $"Could not find the {m_selectedAssetConfig.AssetItemName} item on the selected avatar. Is the {m_selectedAssetConfig.AssetName} installed?",
+                    MessageType.Error);
+                GUILayout.FlexibleSpace();
+                return;
+            }
             //}
             m_assetItem.gameObject.SetActive(true);
 
@@ -1725,8 +1735,6 @@ namespace Okaeri.Editor
 
                     avatarFxAnimController.layers = cleanAvatarFxAnimLayers;
                     avatarFxAnimController.parameters = cleanAvatarFxAnimParameters;
-                    AssetDatabase.SaveAssets();
-                    AssetDatabase.Refresh();
 
                     m_avatar.baseAnimationLayers[avatarFxAnimLayerIndex].animatorController = avatarFxAnimController;
                 }
@@ -1739,11 +1747,18 @@ namespace Okaeri.Editor
             {
                 var avatarExpressionParametersNames = m_avatar.expressionParameters.parameters.Select(p => p.name);
                 var cleanAvatarExpressionParametersNames =
-                    avatarExpressionParametersNames.Except(assetExpressionParametersOnAvatar); 
-                
+                    avatarExpressionParametersNames.Except(assetExpressionParametersOnAvatar);
+
                 m_avatar.expressionParameters.parameters =
                     m_avatar.expressionParameters.parameters.Where(p => cleanAvatarExpressionParametersNames.Contains(p.name)).ToArray();
+
+                // Mark as dirty to force save
+                EditorUtility.SetDirty(m_avatar.expressionParameters);
             }
+
+            // Save everything
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
         }
         #endregion
 
