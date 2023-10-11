@@ -1,4 +1,4 @@
-//VERSION1.0.7
+//VERSION1.0.9
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1086,12 +1086,16 @@ namespace Okaeri.Editor
                 m_assetPrefab = UnpackPrefab(assetPrefabPath);
 
                 // Get the prefab items
-                var assetItems = m_assetPrefab.GetComponentsInChildren<Transform>();
-                if (assetItems == null || assetItems.Length == 0)
+                if (!m_assetPrefab.TryGetComponent<Transform>(out var assetRoot))
                 {
                     var errorMessage = "Cannot install the specified Okaeri asset: Empty or invalid prefab.";
                     m_installLog.Add($"e|{errorMessage}");
                     throw new InvalidDataException(errorMessage);
+                }
+                var assetItems = new Transform[assetRoot.childCount];
+                for (var i = 0; i < assetRoot.childCount; i++)
+                {
+                    assetItems[i] = assetRoot.GetChild(i);
                 }
 
                 // Assign the items to correct places
