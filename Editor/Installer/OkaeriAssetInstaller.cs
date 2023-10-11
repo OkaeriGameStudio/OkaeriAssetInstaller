@@ -146,11 +146,6 @@ namespace Okaeri.Editor
         #region Asset Configurations
 
         /// <summary>
-        /// The asset configuration update error.
-        /// </summary>
-        private string m_configUpdateError = "!";
-
-        /// <summary>
         /// A dictionary of available asset configurations, where the key is their path.
         /// </summary>
         private Dictionary<string, OkaeriAssetConfig> m_localConfigs;
@@ -288,7 +283,12 @@ namespace Okaeri.Editor
                 var latestConfigs = await GetLatestAssetConfigurations();
                 if (!string.IsNullOrWhiteSpace(latestConfigs.error))
                 {
-                    m_configUpdateError = latestConfigs.error;
+                    // Log error message
+                    var errorMessage = latestConfigs.error.Split('|')[1];
+                    UnityEngine.Debug.LogWarning("[Okaeri] " + errorMessage);
+
+                    // Load configurations
+                    LoadAssetConfigurations();
                     return;
                 }
 
@@ -321,12 +321,11 @@ namespace Okaeri.Editor
                 // Logs if the server is dead or no internet
                 UnityEngine.Debug.Log("<color=pink>[Okaeri]" + "Couldn't connect to the server! Proceeding without configs updates...");
             }
-
-            // Load the configurations
-            LoadAssetConfigurations();
-
-            // Set the flag
-            m_configUpdateError = null;
+            finally
+            {
+                // Load the configurations
+                LoadAssetConfigurations();
+            }
         }
 
         #endregion
@@ -379,11 +378,6 @@ namespace Okaeri.Editor
         private Animator m_animator;
 
         /// <summary>
-        /// Determines if the asset configurations are valid.
-        /// </summary>
-        private bool m_validConfigs;
-
-        /// <summary>
         /// Determines if the selected avatar is valid.
         /// </summary>
         private bool m_validAvatar;
@@ -413,15 +407,6 @@ namespace Okaeri.Editor
         {
             // Header
             DrawBanner();
-
-            // Asset configuration errors
-            DrawConfigUpdateErrors();
-            if (!m_validConfigs)
-            {
-                GUILayout.FlexibleSpace();
-                DrawFooter();
-                return;
-            }
 
             // Avatar selection
             DrawAvatarField();
@@ -455,34 +440,6 @@ namespace Okaeri.Editor
 
             // Footer
             DrawFooter();
-        }
-
-        /// <summary>
-        /// Draws an error / warning box if the latest asset configurations weren't properly initialized.
-        /// </summary>
-        private void DrawConfigUpdateErrors()
-        {
-            // Check for ok
-            if (string.IsNullOrWhiteSpace(m_configUpdateError))
-            {
-                m_validConfigs = true;
-                return;
-            }
-
-            // Check for initialization
-            if (m_configUpdateError.Equals("!"))
-            {
-                m_validConfigs = false;
-                return;
-            }
-
-            // Get the type of message
-            var errorMessageParts = m_configUpdateError.Split('|');
-            Enum.TryParse(errorMessageParts[0], true, out MessageType messageType);
-
-            // Show the appropriate message
-            EditorGUILayout.HelpBox(errorMessageParts[1], messageType, true);
-            m_validConfigs = false;
         }
 
         /// <summary>
