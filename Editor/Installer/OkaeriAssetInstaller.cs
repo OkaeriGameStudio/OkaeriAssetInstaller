@@ -1155,7 +1155,6 @@ namespace Okaeri.Editor
                 // Save everything
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
-                EditorSceneManager.SaveOpenScenes();
 
                 // Reset flag
                 m_installing = false;
@@ -1163,6 +1162,10 @@ namespace Okaeri.Editor
 
             if (success)
             {
+                // Save the avatar scene
+                EditorSceneManager.SaveScene(m_avatar.gameObject.scene);
+
+                // Display configuration dialog
                 m_installLog.Add($"s|{assetConfig.AssetName} installed successfully!");
                 m_moveRotateScale = EditorUtility.DisplayDialog(
                     "Okaeri Asset Installer",
