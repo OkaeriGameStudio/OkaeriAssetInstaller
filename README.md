@@ -1,5 +1,5 @@
 # Okaeri Asset Installer
-<img src="https://img.shields.io/badge/latest%20version-1.0.9-%23fdd2ed"/>
+<img src="https://img.shields.io/badge/latest%20version-1.0.10-%23fdd2ed"/>
 
 🖱️A one (maybe two) -click(s) solution to install VRChat Avatar assets made by Okaeri!
 

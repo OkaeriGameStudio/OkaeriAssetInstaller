@@ -1,4 +1,4 @@
-//VERSION1.0.9
+//VERSION1.0.10
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.Animations;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Animations;
 using VRC.SDK3.Avatars.Components;
@@ -1154,6 +1155,7 @@ namespace Okaeri.Editor
                 // Save everything
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
+                EditorSceneManager.SaveOpenScenes();
 
                 // Reset flag
                 m_installing = false;
@@ -1345,6 +1347,7 @@ namespace Okaeri.Editor
             // Update the reference on the avatar
             m_avatar.baseAnimationLayers[fxAnimLayerIndex].isDefault = false;
             m_avatar.baseAnimationLayers[fxAnimLayerIndex].animatorController = AssetDatabase.LoadAssetAtPath<AnimatorController>(avatarFxAnimControllerPath);
+            EditorUtility.SetDirty(m_avatar);
         }
 
         /// <summary>
