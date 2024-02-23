@@ -19,6 +19,11 @@ namespace Okaeri.Editor
         private static readonly Version DEFAULT_VERSION = new Version(0, 0, 0);
 
         /// <summary>
+        /// The link to the Okaeri Discord server.
+        /// </summary>
+        private const string OKAERI_DISCORD_URL = "https://discord.gg/m69Ex9kCPN";
+
+        /// <summary>
         /// The Okaeri Asset Installer file name.
         /// </summary>
         private const string INSTALLER_FILE_NAME = "OkaeriAssetInstaller.cs";
@@ -60,6 +65,7 @@ namespace Okaeri.Editor
             var x = (Screen.currentResolution.width - WINDOW_WIDTH) / 2;
             var y = (Screen.currentResolution.height - height) / 2;
             m_launcherWindow.position = new Rect(x, y, WINDOW_WIDTH, height);
+            m_launcherWindow.titleContent = new GUIContent($"{WINDOW_TITLE} Launcher");
             m_launcherWindow.Show();
         }
 
@@ -96,7 +102,6 @@ namespace Okaeri.Editor
             GetInstallerScriptPath();
             if (CheckForDependencies())
             {
-                //ShowInstaller();
                 CheckForUpdates();
                 return;
             }
@@ -264,13 +269,21 @@ namespace Okaeri.Editor
                 AssetDatabase.SaveAssets();
 
                 // Wait for code compilation
-                await Task.Run(() => Thread.Sleep(2000));
+                await Task.Run(() => {
+                    while(EditorApplication.isCompiling)
+                    {
+                        Thread.Sleep(1000);
+                    }
+                });
             }
             catch
             {
                 // Logs if the server is dead or no internet
                 m_launcherStatus = "Couldn't connect to the server!";
-                Debug.LogWarning("Couldn't connect to the server! Proceeding without installer updates... Version: " + m_installerVersion);
+                if (!m_installerVersion.Equals(DEFAULT_VERSION))
+                {
+                    Debug.LogWarning("[Okaeri Asset Installer] Couldn't connect to the server! Proceeding without installer updates... Version: " + m_installerVersion);
+                }
             }
 
             // Show the installer
@@ -295,6 +308,20 @@ namespace Okaeri.Editor
         /// </summary>
         private void ShowInstaller()
         {
+            // Check if the script is present
+            if (!File.Exists(m_installerScriptPath))
+            {
+                string errorMessage = "Could not find the Okaeri Asset Installer script file. Try to reopen the Okaeri Asset Installer window and try again.";
+                errorMessage += Environment.NewLine + Environment.NewLine + "If the problem persists, please contact us on Discord!";
+                if(!EditorUtility.DisplayDialog("Okaeri Asset Installer Error", errorMessage, "Ok", "Discord"))
+                {
+                    System.Diagnostics.Process.Start(OKAERI_DISCORD_URL);
+                }
+
+                m_closeWindow = true;
+                return;
+            }
+
             // Prepare the window position
             var windowX = (Screen.currentResolution.width - WINDOW_WIDTH) / 2;
             var windowY = (Screen.currentResolution.height - WINDOW_HEIGHT) / 2;
