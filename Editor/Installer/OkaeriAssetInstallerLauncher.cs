@@ -14,14 +14,14 @@ namespace Okaeri.Editor
     public class OkaeriAssetInstallerLauncher : EditorWindow
     {
         /// <summary>
+        /// The default Okaeri Asset Installer version.
+        /// </summary>
+        private static readonly Version DEFAULT_VERSION = new Version(0, 0, 0);
+
+        /// <summary>
         /// The Okaeri Asset Installer file name.
         /// </summary>
         private const string INSTALLER_FILE_NAME = "OkaeriAssetInstaller.cs";
-
-        /// <summary>
-        /// The number of characters for identifying the version.
-        /// </summary>
-        private const int INSTALLER_VERSION_SIZE = 14;
 
         /// <summary>
         /// Window title.
@@ -71,7 +71,7 @@ namespace Okaeri.Editor
         /// <summary>
         /// The current Okaeri Asset Installer version.
         /// </summary>
-        private Version m_installerVersion = new Version(0, 0, 0);
+        private Version m_installerVersion = DEFAULT_VERSION;
 
         /// <summary>
         /// The latest Okaeri Asset Installer version.
@@ -195,22 +195,42 @@ namespace Okaeri.Editor
         }
 
         /// <summary>
+        /// Gets the SemVer version of the Okaeri Asset Installer script provided.
+        /// </summary>
+        /// <param name="installer">The Okaeri Asset Installer script content.</param>
+        /// <returns>A Version</returns>
+        private Version getInstallerVersion(string installer)
+        {
+            // Check the given installer code
+            if (string.IsNullOrWhiteSpace(installer))
+            {
+                return DEFAULT_VERSION;
+            }
+
+            // Search for the first using statement
+            int versionEndIndex = installer.IndexOf("using") - 1;
+
+            // Get the version comment and extract the SemVer version
+            string versionText = installer.Substring(0, versionEndIndex).Replace("//VERSION", "");
+
+            // Parse and return the version
+            return Version.Parse(versionText);
+        }
+
+        /// <summary>
         /// Checks for updates to the Okaeri Asset Installer.
         /// </summary>
         private async void CheckForUpdates()
         {
-
+            
             m_launcherStatus = "Checking for updates";
-            string versionLine, versionString;
 
             // Check if the window is currently installed
             var installerScript = AssetDatabase.LoadAssetAtPath<TextAsset>(m_installerScriptPath);
             if (installerScript != null && !string.IsNullOrWhiteSpace(installerScript.text))
             {
                 m_launcherStatus = "Getting current version";
-                versionLine = installerScript.text.Substring(0, INSTALLER_VERSION_SIZE);
-                versionString = versionLine.Replace("//VERSION", "");
-                m_installerVersion = Version.Parse(versionString);
+                m_installerVersion = getInstallerVersion(installerScript.text);
             }
 
             // Try to update the script
@@ -227,9 +247,7 @@ namespace Okaeri.Editor
                 }
 
                 // Get the latest installer version
-                versionLine = latestInstallerScriptText.Substring(0, INSTALLER_VERSION_SIZE);
-                versionString = versionLine.Replace("//VERSION", "");
-                m_latestInstallerVersion = Version.Parse(versionString);
+                m_latestInstallerVersion = getInstallerVersion(latestInstallerScriptText);
 
                 // Check if we need to update
                 if (m_installerVersion >= m_latestInstallerVersion)
@@ -252,7 +270,7 @@ namespace Okaeri.Editor
             {
                 // Logs if the server is dead or no internet
                 m_launcherStatus = "Couldn't connect to the server!";
-                Debug.Log("<color=pink>[Okaeri]" + "Couldn't connect to the server! Proceeding without installer updates... Version: " + m_installerVersion);
+                Debug.LogWarning("Couldn't connect to the server! Proceeding without installer updates... Version: " + m_installerVersion);
             }
 
             // Show the installer
