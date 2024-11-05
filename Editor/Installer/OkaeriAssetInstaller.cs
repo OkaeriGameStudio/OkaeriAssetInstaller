@@ -1,4 +1,4 @@
-//VERSION1.1.0
+//VERSION1.1.1
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1038,7 +1038,9 @@ namespace Okaeri.Editor
             { "HandL", HumanBodyBones.LeftHand },
             { "HandR", HumanBodyBones.RightHand },
             { "LowerLegL", HumanBodyBones.LeftLowerLeg },
-            { "LowerLegR", HumanBodyBones.RightLowerLeg }
+            { "LowerLegR", HumanBodyBones.RightLowerLeg },
+			{ "LowerArmL", HumanBodyBones.LeftLowerArm },
+			{ "LowerArmR", HumanBodyBones.RightLowerArm },
         };
 
         /// <summary>
